@@ -185,17 +185,26 @@ impl SettingsApp {
     }
 
     fn toggle_row(&mut self, ui: &mut egui::Ui, label: &str, sublabel: &str, value: bool) -> bool {
+        // Note: deliberately not `ui.with_layout(right_to_left(...))` for the
+        // toggle side — without an explicit size, that expands to fill the
+        // row's *entire remaining height* (a well-known egui gotcha), which
+        // is what was blowing up the switches and the gap between rows.
+        // Right-aligning by padding with a fixed-size spacer keeps the row's
+        // height determined only by its actual content.
+        const TOGGLE_W: f32 = 36.0;
         let mut clicked = false;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new(label).size(14.0).color(design::TEXT));
                 ui.label(egui::RichText::new(sublabel).size(12.0).color(design::NEUTRAL_600));
             });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if design::toggle_switch(ui, value).clicked() {
-                    clicked = true;
-                }
-            });
+            let remaining = ui.available_width();
+            if remaining > TOGGLE_W {
+                ui.add_space(remaining - TOGGLE_W);
+            }
+            if design::toggle_switch(ui, value).clicked() {
+                clicked = true;
+            }
         });
         clicked
     }
@@ -518,19 +527,27 @@ impl SettingsApp {
     }
 
     fn stats_tab(&mut self, ui: &mut egui::Ui) {
+        // See the note in `toggle_row`: an unconstrained
+        // `with_layout(right_to_left(...))` here would blow this row up to
+        // the tab's full remaining height, so we allocate a fixed-size
+        // right-hand region for the segmented control instead.
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Usage stats").size(21.0).strong().color(design::TEXT));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let options = ["90d", "30d", "7d"];
-                let current = match self.stats_period_days {
-                    90 => 0,
-                    30 => 1,
-                    _ => 2,
-                };
-                if let Some(i) = design::segmented(ui, &options, current) {
-                    self.stats_period_days = [90, 30, 7][i];
-                }
-            });
+            ui.allocate_ui_with_layout(
+                egui::vec2(160.0, 24.0),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    let options = ["90d", "30d", "7d"];
+                    let current = match self.stats_period_days {
+                        90 => 0,
+                        30 => 1,
+                        _ => 2,
+                    };
+                    if let Some(i) = design::segmented(ui, &options, current) {
+                        self.stats_period_days = [90, 30, 7][i];
+                    }
+                },
+            );
         });
         ui.add_space(2.0);
         ui.label(
