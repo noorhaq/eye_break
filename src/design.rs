@@ -1,34 +1,167 @@
 //! Visual chrome for the Settings window, ported from the "Classical" design
-//! (warm/editorial palette, sidebar nav, radial gauges) at
-//! claude.ai/design — see `Eye Break Settings.dc.html` in that project.
+//! (warm/editorial layout — sidebar nav, radial gauges, card-elevated
+//! content) at claude.ai/design — see `Eye Break Settings.dc.html` in that
+//! project.
 //!
-//! This is deliberately separate from `theme.rs`: `theme::Theme` is a
-//! *user-facing setting* that controls the break overlay/corner timer's
-//! look, while this module is the Settings window's own fixed chrome (not
-//! configurable — it's this app's "brand", the same way a website's own
-//! chrome doesn't change even if it lets you pick a dark/light reading mode
-//! for content).
+//! Unlike the layout, the *colors* are not fixed: the Settings window now
+//! follows the same user-selectable `Theme` as the break overlay/corner
+//! timer, so picking e.g. "Nord" in Settings recolors Settings itself too.
+//! `palette_for()` below derives a complete, contrast-aware, properly
+//! saturated 12-color palette procedurally from each theme's 4 base colors
+//! (`theme::palette`) — tints/shades are generated relative to that theme's
+//! own darkness, not just the original warm palette's fixed offsets slapped
+//! onto different hues, which would produce muddy or illegible results for
+//! e.g. the dark themes.
+//!
+//! The corner timer is the one exception: it never calls `apply()`, so its
+//! thread-local palette stays at `CLASSICAL` — it deliberately keeps its own
+//! fixed look regardless of the selected Theme (a prior, explicit decision;
+//! see `timer.rs`).
 
+use crate::theme::Theme;
 use eframe::egui;
+use std::cell::Cell;
 
-pub const BG: egui::Color32 = egui::Color32::from_rgb(0xf3, 0xf2, 0xf2);
-pub const SURFACE: egui::Color32 = egui::Color32::from_rgb(0xea, 0xe9, 0xe9);
-pub const TEXT: egui::Color32 = egui::Color32::from_rgb(0x20, 0x1f, 0x1d);
-pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(0xb6, 0x82, 0x35);
-pub const ACCENT_100: egui::Color32 = egui::Color32::from_rgb(0xff, 0xf3, 0xe4);
-pub const ACCENT_300: egui::Color32 = egui::Color32::from_rgb(0xfa, 0xcb, 0x8d);
-pub const ACCENT_500: egui::Color32 = egui::Color32::from_rgb(0xc2, 0x8d, 0x41);
-pub const ACCENT_700: egui::Color32 = egui::Color32::from_rgb(0x7d, 0x54, 0x11);
-pub const ACCENT_800: egui::Color32 = egui::Color32::from_rgb(0x5a, 0x3b, 0x0a);
-pub const NEUTRAL_200: egui::Color32 = egui::Color32::from_rgb(0xea, 0xe7, 0xe7);
-pub const NEUTRAL_600: egui::Color32 = egui::Color32::from_rgb(0x7d, 0x79, 0x79);
-pub const DIVIDER: egui::Color32 = egui::Color32::from_rgba_premultiplied(0x20, 0x1f, 0x1d, 40);
+/// A complete, ready-to-paint color palette: page/surface/text base colors
+/// plus a full accent ramp and the couple of derived neutrals/dividers the
+/// hand-painted widgets below need. Everything in this module reads colors
+/// through the free functions further down (`bg()`, `accent()`, ...) rather
+/// than fields on a passed-around struct, so every widget function keeps its
+/// original simple signature — the active palette is frame-global state, set
+/// once by `apply()`.
+#[derive(Clone, Copy)]
+pub struct Palette {
+    pub bg: egui::Color32,
+    pub surface: egui::Color32,
+    pub text: egui::Color32,
+    pub accent: egui::Color32,
+    pub accent_100: egui::Color32,
+    pub accent_300: egui::Color32,
+    pub accent_500: egui::Color32,
+    pub accent_700: egui::Color32,
+    pub accent_800: egui::Color32,
+    pub neutral_200: egui::Color32,
+    pub neutral_600: egui::Color32,
+    pub divider: egui::Color32,
+    pub is_dark: bool,
+}
+
+/// The original hand-tuned warm/editorial palette this design shipped with.
+/// Used by the corner timer (which keeps a fixed look) and as the initial
+/// thread-local default before `apply()` has run.
+const CLASSICAL: Palette = Palette {
+    bg: egui::Color32::from_rgb(0xf3, 0xf2, 0xf2),
+    surface: egui::Color32::from_rgb(0xea, 0xe9, 0xe9),
+    text: egui::Color32::from_rgb(0x20, 0x1f, 0x1d),
+    accent: egui::Color32::from_rgb(0xb6, 0x82, 0x35),
+    accent_100: egui::Color32::from_rgb(0xff, 0xf3, 0xe4),
+    accent_300: egui::Color32::from_rgb(0xfa, 0xcb, 0x8d),
+    accent_500: egui::Color32::from_rgb(0xc2, 0x8d, 0x41),
+    accent_700: egui::Color32::from_rgb(0x7d, 0x54, 0x11),
+    accent_800: egui::Color32::from_rgb(0x5a, 0x3b, 0x0a),
+    neutral_200: egui::Color32::from_rgb(0xea, 0xe7, 0xe7),
+    neutral_600: egui::Color32::from_rgb(0x7d, 0x79, 0x79),
+    divider: egui::Color32::from_rgba_premultiplied(0x20, 0x1f, 0x1d, 40),
+    is_dark: false,
+};
+
+thread_local! {
+    /// The active window's resolved palette for the current frame. Set by
+    /// `apply()`; stays at `CLASSICAL` for any window that never calls it.
+    static PALETTE: Cell<Palette> = Cell::new(CLASSICAL);
+}
+
+pub fn bg() -> egui::Color32 { PALETTE.with(|p| p.get().bg) }
+pub fn surface() -> egui::Color32 { PALETTE.with(|p| p.get().surface) }
+pub fn text() -> egui::Color32 { PALETTE.with(|p| p.get().text) }
+pub fn accent() -> egui::Color32 { PALETTE.with(|p| p.get().accent) }
+pub fn accent_100() -> egui::Color32 { PALETTE.with(|p| p.get().accent_100) }
+#[allow(dead_code)] // kept for API symmetry with the rest of the accent ramp
+pub fn accent_300() -> egui::Color32 { PALETTE.with(|p| p.get().accent_300) }
+pub fn accent_500() -> egui::Color32 { PALETTE.with(|p| p.get().accent_500) }
+pub fn accent_700() -> egui::Color32 { PALETTE.with(|p| p.get().accent_700) }
+pub fn accent_800() -> egui::Color32 { PALETTE.with(|p| p.get().accent_800) }
+pub fn neutral_200() -> egui::Color32 { PALETTE.with(|p| p.get().neutral_200) }
+pub fn neutral_600() -> egui::Color32 { PALETTE.with(|p| p.get().neutral_600) }
+pub fn divider() -> egui::Color32 { PALETTE.with(|p| p.get().divider) }
+pub fn is_dark() -> bool { PALETTE.with(|p| p.get().is_dark) }
+
+/// Perceptual luminance in 0.0..1.0, used to decide whether a theme's base
+/// colors read as a dark or light scheme (drives which direction tints get
+/// generated in).
+fn luminance(c: egui::Color32) -> f32 {
+    (0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32) / 255.0
+}
+
+fn lerp_rgb(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
+    let t = t.clamp(0.0, 1.0);
+    egui::Color32::from_rgb(
+        (a.r() as f32 + (b.r() as f32 - a.r() as f32) * t).round() as u8,
+        (a.g() as f32 + (b.g() as f32 - a.g() as f32) * t).round() as u8,
+        (a.b() as f32 + (b.b() as f32 - a.b() as f32) * t).round() as u8,
+    )
+}
+
+fn lighten(c: egui::Color32, t: f32) -> egui::Color32 {
+    lerp_rgb(c, egui::Color32::WHITE, t)
+}
+
+fn darken(c: egui::Color32, t: f32) -> egui::Color32 {
+    lerp_rgb(c, egui::Color32::BLACK, t)
+}
+
+/// Derives a full `Palette` from a `Theme`'s 4 base colors
+/// (`theme::palette`). The direction every tint/shade is generated in
+/// depends on whether the theme reads as dark or light — mixing toward
+/// white for a light theme's highlight backgrounds would make no sense for
+/// a dark one (and vice versa for the "readable accent text" shades), so
+/// this isn't the same fixed offsets reused across themes; each theme gets
+/// tints that are actually legible and saturated against its own base.
+pub fn palette_for(theme: Theme) -> Palette {
+    let (bg, surface, accent, text) = crate::theme::palette(theme);
+    let dark = luminance(bg) < 0.5;
+
+    let (accent_100, accent_300, accent_700, accent_800, neutral_200) = if dark {
+        (
+            lerp_rgb(surface, accent, 0.22),
+            lerp_rgb(surface, accent, 0.45),
+            lighten(accent, 0.22),
+            lighten(accent, 0.40),
+            lerp_rgb(surface, text, 0.12),
+        )
+    } else {
+        (
+            lerp_rgb(egui::Color32::WHITE, accent, 0.12),
+            lerp_rgb(egui::Color32::WHITE, accent, 0.38),
+            darken(accent, 0.28),
+            darken(accent, 0.45),
+            lerp_rgb(egui::Color32::WHITE, text, 0.10),
+        )
+    };
+    let accent_500 = if dark { lighten(accent, 0.08) } else { darken(accent, 0.10) };
+    let neutral_600 = lerp_rgb(bg, text, 0.55);
+    let divider = egui::Color32::from_rgba_premultiplied(text.r(), text.g(), text.b(), 40);
+
+    Palette {
+        bg,
+        surface,
+        text,
+        accent,
+        accent_100,
+        accent_300,
+        accent_500,
+        accent_700,
+        accent_800,
+        neutral_200,
+        neutral_600,
+        divider,
+        is_dark: dark,
+    }
+}
 
 pub const RADIUS_MD: f32 = 4.0;
-/// Card/dialog-scale corner radius, for future use (the settings window's
-/// own frame isn't rounded, since it's a native window, not the design's
-/// mocked-up browser-chrome card) — kept for parity with the design tokens.
-#[allow(dead_code)]
+/// Card/dialog-scale corner radius — used by `card()` below and by the
+/// corner timer's own card.
 pub const RADIUS_LG: f32 = 7.0;
 
 /// The design's serif display face (headings, big numbers), embedded from
@@ -81,48 +214,70 @@ pub fn heading_font(size: f32) -> egui::FontId {
     egui::FontId::new(size, egui::FontFamily::Name(HEADING_FONT.into()))
 }
 
-/// Applies the Classical chrome to an egui context — call once per frame
-/// before drawing the settings window's panels.
-pub fn apply(ctx: &egui::Context) {
-    let mut visuals = egui::Visuals::light();
-    visuals.override_text_color = Some(TEXT);
-    visuals.window_fill = BG;
-    visuals.panel_fill = BG;
-    visuals.widgets.noninteractive.bg_fill = SURFACE;
+/// Resolves `theme`'s palette, stashes it in the thread-local so every
+/// widget function below picks it up, and applies it to the egui visuals —
+/// call once per frame before drawing the settings window's panels.
+pub fn apply(ctx: &egui::Context, theme: Theme) {
+    let palette = palette_for(theme);
+    PALETTE.with(|p| p.set(palette));
+
+    let mut visuals = if palette.is_dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+    visuals.override_text_color = Some(palette.text);
+    visuals.window_fill = palette.bg;
+    visuals.panel_fill = palette.bg;
+    visuals.widgets.noninteractive.bg_fill = palette.surface;
     visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-    visuals.widgets.inactive.weak_bg_fill = SURFACE;
-    visuals.widgets.hovered.bg_fill = ACCENT_100;
-    visuals.widgets.active.bg_fill = ACCENT_300;
-    visuals.selection.bg_fill = ACCENT_300;
-    visuals.selection.stroke = egui::Stroke::new(1.0_f32, ACCENT_700);
-    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, DIVIDER);
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, DIVIDER);
+    visuals.widgets.inactive.weak_bg_fill = palette.surface;
+    visuals.widgets.hovered.bg_fill = palette.accent_100;
+    visuals.widgets.active.bg_fill = palette.accent_300;
+    visuals.selection.bg_fill = palette.accent_300;
+    visuals.selection.stroke = egui::Stroke::new(1.0_f32, palette.accent_700);
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, palette.divider);
+    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, palette.divider);
+    // `extreme_bg_color` (text fields, sliders' groove) defaults to a
+    // near-black egui left over from `Visuals::dark()`/`light()`'s own
+    // presets — visibly clashing with our own themed surfaces if left
+    // as-is (a near-black input on a themed dark-blue card, for example).
+    // Tie it to the same palette instead.
+    visuals.extreme_bg_color = if palette.is_dark {
+        darken(palette.surface, 0.18)
+    } else {
+        lighten(palette.surface, 0.6)
+    };
     ctx.set_visuals(visuals);
 }
 
 /// A soft drop shadow, matching CSS `box-shadow`'s look via egui's actual
-/// blurred-shadow tessellation (`epaint::Shadow`) rather than a flat stroke —
-/// this is the single biggest "premium vs. flat" cue a card can have, and
-/// egui already renders it properly (a real Gaussian-ish falloff), it just
-/// wasn't being used anywhere in this window before.
+/// blurred-shadow tessellation (`epaint::Shadow`) rather than a flat stroke.
+/// Slightly stronger in dark themes, where a black shadow otherwise barely
+/// registers against an already-dark page background.
 pub fn card_shadow() -> egui::epaint::Shadow {
+    let alpha = if is_dark() { 60 } else { 28 };
     egui::epaint::Shadow {
         offset: egui::vec2(0.0, 3.0),
         blur: 18.0,
         spread: 0.0,
-        color: egui::Color32::from_black_alpha(28),
+        color: egui::Color32::from_black_alpha(alpha),
     }
 }
 
 /// A raised content card: rounded corners, a hairline border, and a soft
 /// shadow lifting it off the page background — matches the design's `.card`
-/// treatment, which the settings window's flat, unbordered tab content was
-/// missing entirely.
+/// treatment. The fill is a step lighter than `surface()` in both directions
+/// (further toward white for light themes, a modest lift for dark ones,
+/// mirroring how Material-style dark UIs raise elevated surfaces rather than
+/// lightening all the way to white), so "elevated" reads correctly whichever
+/// theme is active instead of hardcoding white.
 pub fn card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let fill = if is_dark() {
+        lighten(surface(), 0.12)
+    } else {
+        lighten(surface(), 0.9)
+    };
     egui::Frame::none()
-        .fill(egui::Color32::WHITE)
+        .fill(fill)
         .rounding(RADIUS_LG)
-        .stroke(egui::Stroke::new(1.0_f32, DIVIDER))
+        .stroke(egui::Stroke::new(1.0_f32, divider()))
         .shadow(card_shadow())
         .inner_margin(egui::Margin::symmetric(28.0, 24.0))
         .show(ui, add_contents)
@@ -141,11 +296,11 @@ pub fn toggle_switch(ui: &mut egui::Ui, on: bool) -> egui::Response {
         // On-hover, nudge toward the "on" accent so the control visibly
         // previews what a click would do, same idea as a CSS `:hover` rule.
         let track_color = match (on, response.hovered()) {
-            (true, _) => ACCENT,
-            (false, true) => ACCENT_100,
+            (true, _) => accent(),
+            (false, true) => accent_100(),
             (false, false) => egui::Color32::TRANSPARENT,
         };
-        let track_stroke = if on || response.hovered() { ACCENT_700 } else { DIVIDER };
+        let track_stroke = if on || response.hovered() { accent_700() } else { divider() };
         painter.rect_filled(rect, 999.0, track_color);
         painter.rect_stroke(rect, 999.0, egui::Stroke::new(1.0_f32, track_stroke));
         let knob_x = if on {
@@ -154,7 +309,7 @@ pub fn toggle_switch(ui: &mut egui::Ui, on: bool) -> egui::Response {
             rect.left() + KNOB_R + KNOB_GAP
         };
         let knob_center = egui::pos2(knob_x, rect.center().y);
-        let knob_color = if on { egui::Color32::WHITE } else { NEUTRAL_600 };
+        let knob_color = if on { egui::Color32::WHITE } else { neutral_600() };
         painter.circle_filled(knob_center, KNOB_R, knob_color);
     }
     response
@@ -166,18 +321,18 @@ pub fn chip(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(
         label.to_string(),
         egui::FontId::proportional(12.5),
-        TEXT,
+        text(),
     );
     let padding = egui::vec2(12.0, 5.0);
     let size = galley.size() + padding * 2.0;
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     if ui.is_rect_visible(rect) {
         let (fill, stroke, text_color) = if active {
-            (ACCENT_100, ACCENT, ACCENT_700)
+            (accent_100(), accent(), accent_700())
         } else if response.hovered() {
-            (NEUTRAL_200, DIVIDER, TEXT)
+            (neutral_200(), divider(), text())
         } else {
-            (egui::Color32::TRANSPARENT, DIVIDER, TEXT)
+            (egui::Color32::TRANSPARENT, divider(), text())
         };
         ui.painter().rect_filled(rect, 999.0, fill);
         ui.painter().rect_stroke(rect, 999.0, egui::Stroke::new(1.0_f32, stroke));
@@ -200,16 +355,16 @@ pub fn segmented(ui: &mut egui::Ui, options: &[&str], current: usize) -> Option<
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         egui::Frame::none()
-            .stroke(egui::Stroke::new(1.0_f32, DIVIDER))
+            .stroke(egui::Stroke::new(1.0_f32, divider()))
             .rounding(RADIUS_MD)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for (i, label) in options.iter().enumerate() {
                         let selected = i == current;
                         let (fill, text_color) = if selected {
-                            (ACCENT_100, ACCENT_700)
+                            (accent_100(), accent_700())
                         } else {
-                            (egui::Color32::TRANSPARENT, TEXT)
+                            (egui::Color32::TRANSPARENT, text())
                         };
                         let resp = egui::Frame::none()
                             .fill(fill)
@@ -225,7 +380,7 @@ pub fn segmented(ui: &mut egui::Ui, options: &[&str], current: usize) -> Option<
                             ui.painter().vline(
                                 ui.min_rect().right(),
                                 ui.min_rect().y_range(),
-                                egui::Stroke::new(1.0_f32, DIVIDER),
+                                egui::Stroke::new(1.0_f32, divider()),
                             );
                         }
                     }
@@ -247,7 +402,7 @@ pub fn radial_gauge(ui: &mut egui::Ui, diameter: f32, fraction: f32, big_text: &
     let radius = diameter / 2.0 - 5.0;
     let stroke_w = diameter * 0.067;
 
-    painter.circle_stroke(center, radius, egui::Stroke::new(stroke_w, DIVIDER));
+    painter.circle_stroke(center, radius, egui::Stroke::new(stroke_w, divider()));
 
     let start_deg = -90.0_f32;
     let end_deg = start_deg + fraction.clamp(0.0, 0.999) * 360.0;
@@ -258,21 +413,21 @@ pub fn radial_gauge(ui: &mut egui::Ui, diameter: f32, fraction: f32, big_text: &
         let rad = t.to_radians();
         points.push(center + egui::vec2(radius * rad.cos(), radius * rad.sin()));
     }
-    painter.add(egui::Shape::line(points, egui::Stroke::new(stroke_w, ACCENT)));
+    painter.add(egui::Shape::line(points, egui::Stroke::new(stroke_w, accent())));
 
     painter.text(
         center + egui::vec2(0.0, -diameter * 0.06),
         egui::Align2::CENTER_CENTER,
         big_text,
         heading_font(diameter * 0.18),
-        TEXT,
+        text(),
     );
     painter.text(
         center + egui::vec2(0.0, diameter * 0.11),
         egui::Align2::CENTER_CENTER,
         small_text,
         egui::FontId::proportional(diameter * 0.08),
-        NEUTRAL_600,
+        neutral_600(),
     );
 }
 
@@ -292,7 +447,7 @@ pub fn activity_wheel(ui: &mut egui::Ui, diameter: f32, fractions: &[f32; 24]) {
         let start_deg = (h as f32 / 24.0) * 360.0 - 90.0;
         let end_deg = ((h as f32 + 1.0) / 24.0) * 360.0 - 90.0 - 1.2;
         let r_outer = r_inner + (r_outer_max - r_inner) * frac.clamp(0.02, 1.0);
-        let color = lerp_color(NEUTRAL_200, ACCENT, *frac);
+        let color = lerp_rgb(neutral_200(), accent(), *frac);
 
         let steps = 6;
         let mut pts = Vec::with_capacity(steps * 2 + 2);
@@ -309,30 +464,21 @@ pub fn activity_wheel(ui: &mut egui::Ui, diameter: f32, fractions: &[f32; 24]) {
         painter.add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
     }
 
-    painter.circle_filled(center, r_inner - 2.0, BG);
+    painter.circle_filled(center, r_inner - 2.0, bg());
     painter.text(
         center + egui::vec2(0.0, -6.0),
         egui::Align2::CENTER_CENTER,
         "24h",
         egui::FontId::proportional(11.0),
-        TEXT,
+        text(),
     );
     painter.text(
         center + egui::vec2(0.0, 7.0),
         egui::Align2::CENTER_CENTER,
         "activity",
         egui::FontId::proportional(9.0),
-        NEUTRAL_600,
+        neutral_600(),
     );
-}
-
-fn lerp_color(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
-    let t = t.clamp(0.0, 1.0);
-    egui::Color32::from_rgb(
-        (a.r() as f32 + (b.r() as f32 - a.r() as f32) * t) as u8,
-        (a.g() as f32 + (b.g() as f32 - a.g() as f32) * t) as u8,
-        (a.b() as f32 + (b.b() as f32 - a.b() as f32) * t) as u8,
-    )
 }
 
 /// A clock face with two hands (start/end), matching the workday-schedule
@@ -347,7 +493,7 @@ pub fn clock_face(ui: &mut egui::Ui, diameter: f32, start_frac_of_12h: f32, end_
     let center = rect.center();
     let radius = diameter / 2.0 - 6.0;
 
-    painter.circle_stroke(center, radius, egui::Stroke::new(diameter * 0.06, DIVIDER));
+    painter.circle_stroke(center, radius, egui::Stroke::new(diameter * 0.06, divider()));
 
     let hand = |frac: f32, color: egui::Color32, length: f32| {
         let deg: f32 = frac * 360.0 - 90.0;
@@ -360,9 +506,9 @@ pub fn clock_face(ui: &mut egui::Ui, diameter: f32, start_frac_of_12h: f32, end_
             color,
         );
     };
-    hand(start_frac_of_12h, ACCENT, radius * 0.78);
-    hand(end_frac_of_12h, ACCENT_800, radius * 0.78);
-    painter.circle_filled(center, 3.0, TEXT);
+    hand(start_frac_of_12h, accent(), radius * 0.78);
+    hand(end_frac_of_12h, accent_800(), radius * 0.78);
+    painter.circle_filled(center, 3.0, text());
 
     for (label, frac) in [("12", 0.0_f32), ("3", 0.25), ("6", 0.5), ("9", 0.75)] {
         let deg: f32 = frac * 360.0 - 90.0;
@@ -373,7 +519,7 @@ pub fn clock_face(ui: &mut egui::Ui, diameter: f32, start_frac_of_12h: f32, end_
             egui::Align2::CENTER_CENTER,
             label,
             egui::FontId::proportional(9.0),
-            NEUTRAL_600,
+            neutral_600(),
         );
     }
 }

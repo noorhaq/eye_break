@@ -95,14 +95,14 @@ impl SettingsApp {
 
 impl eframe::App for SettingsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        design::apply(ctx);
+        design::apply(ctx, self.cfg.theme);
 
         egui::SidePanel::left("nav")
             .exact_width(210.0)
             .resizable(false)
             .frame(
                 egui::Frame::none()
-                    .fill(design::SURFACE)
+                    .fill(design::surface())
                     .inner_margin(egui::Margin::symmetric(14.0, 22.0))
                     .stroke(egui::Stroke::NONE),
             )
@@ -110,18 +110,18 @@ impl eframe::App for SettingsApp {
                 ui.horizontal(|ui| {
                     let (eye_rect, _resp) =
                         ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
-                    design::eye_icon(ui.painter(), eye_rect, design::ACCENT_700);
+                    design::eye_icon(ui.painter(), eye_rect, design::accent_700());
                     ui.add_space(4.0);
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new("Eye Break")
                                 .font(design::heading_font(16.0))
-                                .color(design::TEXT),
+                                .color(design::text()),
                         );
                         ui.label(
                             egui::RichText::new("20-20-20 reminders")
                                 .size(10.5)
-                                .color(design::NEUTRAL_600),
+                                .color(design::neutral_600()),
                         );
                     });
                 });
@@ -129,7 +129,7 @@ impl eframe::App for SettingsApp {
                 ui.painter().hline(
                     ui.min_rect().x_range(),
                     ui.min_rect().bottom(),
-                    egui::Stroke::new(1.0_f32, design::DIVIDER),
+                    egui::Stroke::new(1.0_f32, design::divider()),
                 );
                 ui.add_space(10.0);
 
@@ -142,11 +142,11 @@ impl eframe::App for SettingsApp {
                     // only reacting on click — a small thing, but it's the
                     // difference between a static list and a "live" UI.
                     let (fill, text_color) = if active {
-                        (design::ACCENT_100, design::ACCENT_700)
+                        (design::accent_100(), design::accent_700())
                     } else if response.hovered() {
-                        (design::NEUTRAL_200, design::TEXT)
+                        (design::neutral_200(), design::text())
                     } else {
-                        (egui::Color32::TRANSPARENT, design::TEXT)
+                        (egui::Color32::TRANSPARENT, design::text())
                     };
                     if ui.is_rect_visible(rect) {
                         let painter = ui.painter();
@@ -174,7 +174,7 @@ impl eframe::App for SettingsApp {
                     ui.label(
                         egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
                             .size(11.0)
-                            .color(design::NEUTRAL_600),
+                            .color(design::neutral_600()),
                     );
                 });
             });
@@ -182,7 +182,7 @@ impl eframe::App for SettingsApp {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
-                    .fill(design::BG)
+                    .fill(design::bg())
                     .inner_margin(egui::Margin::symmetric(28.0, 24.0)),
             )
             .show(ctx, |ui| {
@@ -205,10 +205,10 @@ impl SettingsApp {
         ui.label(
             egui::RichText::new(title)
                 .font(design::heading_font(24.0))
-                .color(design::TEXT),
+                .color(design::text()),
         );
         ui.add_space(2.0);
-        ui.label(egui::RichText::new(subtitle).size(12.5).color(design::NEUTRAL_600));
+        ui.label(egui::RichText::new(subtitle).size(12.5).color(design::neutral_600()));
         ui.add_space(20.0);
     }
 
@@ -223,8 +223,8 @@ impl SettingsApp {
         let mut clicked = false;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(egui::RichText::new(label).size(14.0).color(design::TEXT));
-                ui.label(egui::RichText::new(sublabel).size(12.0).color(design::NEUTRAL_600));
+                ui.label(egui::RichText::new(label).size(14.0).color(design::text()));
+                ui.label(egui::RichText::new(sublabel).size(12.0).color(design::neutral_600()));
             });
             let remaining = ui.available_width();
             if remaining > TOGGLE_W {
@@ -257,7 +257,7 @@ impl SettingsApp {
         if self.cfg.show_timer {
             ui.horizontal(|ui| {
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new("Opacity:").size(12.0).color(design::NEUTRAL_600));
+                ui.label(egui::RichText::new("Opacity:").size(12.0).color(design::neutral_600()));
                 if ui
                     .add(
                         egui::Slider::new(&mut self.cfg.corner_timer_opacity, 0.1..=1.0)
@@ -270,13 +270,13 @@ impl SettingsApp {
                 ui.label(
                     egui::RichText::new(format!("{}%", (self.cfg.corner_timer_opacity * 100.0).round() as i32))
                         .size(12.0)
-                        .color(design::NEUTRAL_600),
+                        .color(design::neutral_600()),
                 );
             });
         }
 
         ui.add_space(16.0);
-        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::DIVIDER));
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::divider()));
         ui.add_space(16.0);
 
         ui.horizontal(|ui| {
@@ -284,7 +284,7 @@ impl SettingsApp {
             design::radial_gauge(ui, 120.0, frac, &(self.cfg.interval_secs / 60).to_string(), "minutes");
             ui.add_space(28.0);
             ui.vertical(|ui| {
-                ui.label(egui::RichText::new("Reminder interval").size(14.0).color(design::TEXT));
+                ui.label(egui::RichText::new("Reminder interval").size(14.0).color(design::text()));
                 ui.add_space(8.0);
                 ui.horizontal_wrapped(|ui| {
                     for &min in INTERVAL_PRESETS_MIN {
@@ -300,11 +300,11 @@ impl SettingsApp {
 
         ui.add_space(20.0);
         ui.columns(2, |cols| {
-            cols[0].label(egui::RichText::new("Break duration (sec)").size(12.0).color(design::NEUTRAL_600));
+            cols[0].label(egui::RichText::new("Break duration (sec)").size(12.0).color(design::neutral_600()));
             if cols[0].add(egui::DragValue::new(&mut self.cfg.display_secs).range(1..=120)).changed() {
                 self.save_cfg();
             }
-            cols[1].label(egui::RichText::new("Snooze length (min)").size(12.0).color(design::NEUTRAL_600));
+            cols[1].label(egui::RichText::new("Snooze length (min)").size(12.0).color(design::neutral_600()));
             let mut snooze_min = self.cfg.snooze_secs / 60;
             if cols[1].add(egui::DragValue::new(&mut snooze_min).range(1..=180)).changed() {
                 self.cfg.snooze_secs = snooze_min * 60;
@@ -313,15 +313,15 @@ impl SettingsApp {
         });
 
         ui.add_space(16.0);
-        ui.label(egui::RichText::new("Reminder text").size(12.0).color(design::NEUTRAL_600));
+        ui.label(egui::RichText::new("Reminder text").size(12.0).color(design::neutral_600()));
         if ui.text_edit_singleline(&mut self.cfg.reminder_text).changed() {
             self.save_cfg();
         }
 
         ui.add_space(24.0);
-        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::DIVIDER));
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::divider()));
         ui.add_space(16.0);
-        ui.label(egui::RichText::new("Startup & updates").size(14.0).color(design::TEXT));
+        ui.label(egui::RichText::new("Startup & updates").size(14.0).color(design::text()));
         ui.add_space(8.0);
         let mut autostart_on = self.autostart_enabled;
         if self.toggle_row(ui, "Run on startup", "Launch automatically when you log in", autostart_on) {
@@ -342,7 +342,7 @@ impl SettingsApp {
             });
         }
         if let Some(status) = self.update_status.lock().unwrap().as_ref() {
-            ui.label(egui::RichText::new(status).size(12.0).color(design::NEUTRAL_600));
+            ui.label(egui::RichText::new(status).size(12.0).color(design::neutral_600()));
         }
     }
 
@@ -354,9 +354,9 @@ impl SettingsApp {
                 let active = self.cfg.theme == t;
                 let (bg, _panel, accent, text) = crate::theme::palette(t);
                 let (fill, stroke) = if active {
-                    (design::ACCENT_100, egui::Stroke::new(1.5_f32, design::ACCENT))
+                    (design::accent_100(), egui::Stroke::new(1.5_f32, design::accent()))
                 } else {
-                    (egui::Color32::TRANSPARENT, egui::Stroke::new(1.0_f32, design::DIVIDER))
+                    (egui::Color32::TRANSPARENT, egui::Stroke::new(1.0_f32, design::divider()))
                 };
                 let resp = egui::Frame::none()
                     .fill(fill)
@@ -369,11 +369,11 @@ impl SettingsApp {
                             for c in [bg, accent, text] {
                                 let (r, _resp) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
                                 ui.painter().rect_filled(r, 3.0, c);
-                                ui.painter().rect_stroke(r, 3.0, egui::Stroke::new(1.0_f32, design::DIVIDER));
+                                ui.painter().rect_stroke(r, 3.0, egui::Stroke::new(1.0_f32, design::divider()));
                             }
                         });
                         ui.add_space(8.0);
-                        ui.label(egui::RichText::new(t.label()).size(13.0).color(design::TEXT));
+                        ui.label(egui::RichText::new(t.label()).size(13.0).color(design::text()));
                     })
                     .response;
                 if ui.interact(resp.rect, resp.id.with("theme-card"), egui::Sense::click()).clicked() {
@@ -414,7 +414,7 @@ impl SettingsApp {
 
         if let SoundChoice::Custom(_) = &self.cfg.sound {
             ui.add_space(20.0);
-            ui.label(egui::RichText::new("Custom sound path").size(12.0).color(design::NEUTRAL_600));
+            ui.label(egui::RichText::new("Custom sound path").size(12.0).color(design::neutral_600()));
             let mut path = match &self.cfg.sound {
                 SoundChoice::Custom(p) => p.clone(),
                 _ => String::new(),
@@ -444,36 +444,36 @@ impl SettingsApp {
 
         ui.add_space(20.0);
         ui.columns(2, |cols| {
-            cols[0].label(egui::RichText::new("Work (min)").size(12.0).color(design::NEUTRAL_600));
+            cols[0].label(egui::RichText::new("Work (min)").size(12.0).color(design::neutral_600()));
             if cols[0].add(egui::DragValue::new(&mut self.cfg.pomodoro_work_mins).range(1..=120)).changed() {
                 self.save_cfg();
             }
-            cols[1].label(egui::RichText::new("Short break (min)").size(12.0).color(design::NEUTRAL_600));
+            cols[1].label(egui::RichText::new("Short break (min)").size(12.0).color(design::neutral_600()));
             if cols[1].add(egui::DragValue::new(&mut self.cfg.pomodoro_short_break_mins).range(1..=60)).changed() {
                 self.save_cfg();
             }
         });
         ui.add_space(10.0);
         ui.columns(2, |cols| {
-            cols[0].label(egui::RichText::new("Long break (min)").size(12.0).color(design::NEUTRAL_600));
+            cols[0].label(egui::RichText::new("Long break (min)").size(12.0).color(design::neutral_600()));
             if cols[0].add(egui::DragValue::new(&mut self.cfg.pomodoro_long_break_mins).range(1..=120)).changed() {
                 self.save_cfg();
             }
-            cols[1].label(egui::RichText::new("Cycles before long break").size(12.0).color(design::NEUTRAL_600));
+            cols[1].label(egui::RichText::new("Cycles before long break").size(12.0).color(design::neutral_600()));
             if cols[1].add(egui::DragValue::new(&mut self.cfg.pomodoro_cycles_before_long_break).range(1..=12)).changed() {
                 self.save_cfg();
             }
         });
 
         ui.add_space(24.0);
-        ui.label(egui::RichText::new("Cycle preview").size(12.0).color(design::NEUTRAL_600));
+        ui.label(egui::RichText::new("Cycle preview").size(12.0).color(design::neutral_600()));
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
             let cycles = self.cfg.pomodoro_cycles_before_long_break.max(1);
             for i in 0..cycles {
-                tag(ui, "Work", design::ACCENT_100, design::ACCENT_800);
+                tag(ui, "Work", design::accent_100(), design::accent_800());
                 let is_last = i + 1 == cycles;
-                tag(ui, if is_last { "Long" } else { "Short" }, design::NEUTRAL_200, design::TEXT);
+                tag(ui, if is_last { "Long" } else { "Short" }, design::neutral_200(), design::text());
             }
         });
     }
@@ -501,8 +501,8 @@ impl SettingsApp {
             ui.add_space(32.0);
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.colored_label(design::ACCENT, "●");
-                    ui.label(egui::RichText::new("Start").size(12.5).color(design::TEXT));
+                    ui.colored_label(design::accent(), "●");
+                    ui.label(egui::RichText::new("Start").size(12.5).color(design::text()));
                 });
                 let mut changed = false;
                 ui.horizontal(|ui| {
@@ -512,8 +512,8 @@ impl SettingsApp {
                 });
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    ui.colored_label(design::ACCENT_800, "●");
-                    ui.label(egui::RichText::new("End").size(12.5).color(design::TEXT));
+                    ui.colored_label(design::accent_800(), "●");
+                    ui.label(egui::RichText::new("End").size(12.5).color(design::text()));
                 });
                 ui.horizontal(|ui| {
                     changed |= ui.add(egui::DragValue::new(&mut self.cfg.workday_end_hour).range(0..=23)).changed();
@@ -527,7 +527,7 @@ impl SettingsApp {
         });
 
         ui.add_space(20.0);
-        ui.label(egui::RichText::new("Active days").size(12.0).color(design::NEUTRAL_600));
+        ui.label(egui::RichText::new("Active days").size(12.0).color(design::neutral_600()));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             let day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -540,9 +540,9 @@ impl SettingsApp {
         });
 
         ui.add_space(24.0);
-        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::DIVIDER));
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::divider()));
         ui.add_space(16.0);
-        ui.label(egui::RichText::new("Smart pausing").size(14.0).color(design::TEXT));
+        ui.label(egui::RichText::new("Smart pausing").size(14.0).color(design::text()));
         ui.add_space(8.0);
         if self.toggle_row(
             ui,
@@ -556,7 +556,7 @@ impl SettingsApp {
         if self.cfg.idle_pause_enabled {
             ui.horizontal(|ui| {
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new("Idle after (min):").size(12.0).color(design::NEUTRAL_600));
+                ui.label(egui::RichText::new("Idle after (min):").size(12.0).color(design::neutral_600()));
                 if ui.add(egui::DragValue::new(&mut self.cfg.idle_pause_after_mins).range(1..=60)).changed() {
                     self.save_cfg();
                 }
@@ -583,7 +583,7 @@ impl SettingsApp {
             ui.label(
                 egui::RichText::new("Usage stats")
                     .font(design::heading_font(24.0))
-                    .color(design::TEXT),
+                    .color(design::text()),
             );
             ui.allocate_ui_with_layout(
                 egui::vec2(160.0, 24.0),
@@ -605,7 +605,7 @@ impl SettingsApp {
         ui.label(
             egui::RichText::new("Device activity, so you can see how much screen time these breaks are covering.")
                 .size(12.5)
-                .color(design::NEUTRAL_600),
+                .color(design::neutral_600()),
         );
         ui.add_space(18.0);
 
@@ -614,22 +614,22 @@ impl SettingsApp {
             ui.label(
                 egui::RichText::new(format!("{}h {}m", today / 3600, (today % 3600) / 60))
                     .font(design::heading_font(30.0))
-                    .color(design::TEXT),
+                    .color(design::text()),
             );
-            ui.label(egui::RichText::new("today so far").size(12.0).color(design::NEUTRAL_600));
+            ui.label(egui::RichText::new("today so far").size(12.0).color(design::neutral_600()));
         });
 
         ui.add_space(14.0);
         usage_bar_chart(ui, &usage_last_n_days(&self.usage, self.stats_period_days));
 
         ui.add_space(24.0);
-        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::DIVIDER));
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::divider()));
         ui.add_space(16.0);
-        ui.label(egui::RichText::new("Most active hours").size(14.0).color(design::TEXT));
+        ui.label(egui::RichText::new("Most active hours").size(14.0).color(design::text()));
         ui.label(
             egui::RichText::new("Darker wedges mean more device activity in that hour, over the selected period.")
                 .size(12.0)
-                .color(design::NEUTRAL_600),
+                .color(design::neutral_600()),
         );
         ui.add_space(14.0);
         ui.horizontal(|ui| {
@@ -653,7 +653,7 @@ fn tag(ui: &mut egui::Ui, label: &str, bg: egui::Color32, text_color: egui::Colo
 /// Classical design tokens so it matches the rest of the window.
 fn usage_bar_chart(ui: &mut egui::Ui, days: &[crate::stats::DailyUsage]) {
     if days.is_empty() {
-        ui.label(egui::RichText::new("No usage recorded yet.").color(design::NEUTRAL_600));
+        ui.label(egui::RichText::new("No usage recorded yet.").color(design::neutral_600()));
         return;
     }
 
@@ -678,7 +678,7 @@ fn usage_bar_chart(ui: &mut egui::Ui, days: &[crate::stats::DailyUsage]) {
             egui::pos2(x0, rect.top() + CHART_HEIGHT - bar_h),
             egui::pos2(x1, rect.top() + CHART_HEIGHT),
         );
-        painter.rect_filled(bar_rect, 2.0, design::ACCENT_500);
+        painter.rect_filled(bar_rect, 2.0, design::accent_500());
 
         if days.len() <= 14 {
             let short_label = day.date.get(5..).unwrap_or(&day.date);
@@ -687,7 +687,7 @@ fn usage_bar_chart(ui: &mut egui::Ui, days: &[crate::stats::DailyUsage]) {
                 egui::Align2::CENTER_CENTER,
                 short_label,
                 egui::FontId::proportional(10.0),
-                design::NEUTRAL_600,
+                design::neutral_600(),
             );
         }
 
@@ -703,5 +703,5 @@ fn usage_bar_chart(ui: &mut egui::Ui, days: &[crate::stats::DailyUsage]) {
             });
         }
     }
-    painter.hline(rect.x_range(), rect.top() + CHART_HEIGHT, egui::Stroke::new(1.0_f32, design::DIVIDER));
+    painter.hline(rect.x_range(), rect.top() + CHART_HEIGHT, egui::Stroke::new(1.0_f32, design::divider()));
 }

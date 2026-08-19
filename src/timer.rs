@@ -96,11 +96,11 @@ impl eframe::App for TimerApp {
                 let rect = ui.max_rect();
                 let painter = ui.painter();
 
-                painter.rect_filled(rect, egui::Rounding::same(design::RADIUS_LG), faded(design::BG, op));
+                painter.rect_filled(rect, egui::Rounding::same(design::RADIUS_LG), faded(design::bg(), op));
                 painter.rect_stroke(
                     rect,
                     egui::Rounding::same(design::RADIUS_LG),
-                    egui::Stroke::new(1.0_f32, faded(design::DIVIDER, op)),
+                    egui::Stroke::new(1.0_f32, faded(design::divider(), op)),
                 );
 
                 let ring_center = rect.left_center() + egui::vec2(30.0, 0.0);
@@ -110,21 +110,21 @@ impl eframe::App for TimerApp {
                     painter.circle_stroke(
                         ring_center,
                         ring_r,
-                        egui::Stroke::new(3.0_f32, faded(design::DIVIDER, op)),
+                        egui::Stroke::new(3.0_f32, faded(design::divider(), op)),
                     );
                     painter.text(
                         ring_center,
                         egui::Align2::CENTER_CENTER,
                         "⏸",
                         egui::FontId::proportional(13.0),
-                        faded(design::NEUTRAL_600, op),
+                        faded(design::neutral_600(), op),
                     );
                     painter.text(
                         rect.left_center() + egui::vec2(56.0, 0.0),
                         egui::Align2::LEFT_CENTER,
                         "Eye Break paused",
                         design::heading_font(15.0),
-                        faded(design::TEXT, op),
+                        faded(design::text(), op),
                     );
                 } else {
                     let interval = self.cfg.interval_secs.max(1);
@@ -135,7 +135,7 @@ impl eframe::App for TimerApp {
                     painter.circle_stroke(
                         ring_center,
                         ring_r,
-                        egui::Stroke::new(3.0_f32, faded(design::DIVIDER, op)),
+                        egui::Stroke::new(3.0_f32, faded(design::divider(), op)),
                     );
                     let start_deg = -90.0_f32;
                     let end_deg = start_deg + elapsed_frac * 360.0;
@@ -148,7 +148,7 @@ impl eframe::App for TimerApp {
                         })
                         .collect();
                     if pts.len() > 1 {
-                        painter.add(egui::Shape::line(pts, egui::Stroke::new(3.0_f32, faded(design::ACCENT, op))));
+                        painter.add(egui::Shape::line(pts, egui::Stroke::new(3.0_f32, faded(design::accent(), op))));
                     }
 
                     let label_pos = rect.left_center() + egui::vec2(56.0, -9.0);
@@ -157,14 +157,14 @@ impl eframe::App for TimerApp {
                         egui::Align2::LEFT_CENTER,
                         "NEXT BREAK IN",
                         egui::FontId::proportional(10.5),
-                        faded(design::NEUTRAL_600, op),
+                        faded(design::neutral_600(), op),
                     );
                     painter.text(
                         label_pos + egui::vec2(0.0, 17.0),
                         egui::Align2::LEFT_CENTER,
                         format!("{:02}:{:02}", remaining / 60, remaining % 60),
                         design::heading_font(19.0),
-                        faded(design::TEXT, op),
+                        faded(design::text(), op),
                     );
                 }
             });
