@@ -100,6 +100,35 @@ pub fn apply(ctx: &egui::Context) {
     ctx.set_visuals(visuals);
 }
 
+/// A soft drop shadow, matching CSS `box-shadow`'s look via egui's actual
+/// blurred-shadow tessellation (`epaint::Shadow`) rather than a flat stroke —
+/// this is the single biggest "premium vs. flat" cue a card can have, and
+/// egui already renders it properly (a real Gaussian-ish falloff), it just
+/// wasn't being used anywhere in this window before.
+pub fn card_shadow() -> egui::epaint::Shadow {
+    egui::epaint::Shadow {
+        offset: egui::vec2(0.0, 3.0),
+        blur: 18.0,
+        spread: 0.0,
+        color: egui::Color32::from_black_alpha(28),
+    }
+}
+
+/// A raised content card: rounded corners, a hairline border, and a soft
+/// shadow lifting it off the page background — matches the design's `.card`
+/// treatment, which the settings window's flat, unbordered tab content was
+/// missing entirely.
+pub fn card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Frame::none()
+        .fill(egui::Color32::WHITE)
+        .rounding(RADIUS_LG)
+        .stroke(egui::Stroke::new(1.0_f32, DIVIDER))
+        .shadow(card_shadow())
+        .inner_margin(egui::Margin::symmetric(28.0, 24.0))
+        .show(ui, add_contents)
+        .inner
+}
+
 /// A toggle switch matching the design's pill track + circular knob.
 /// Returns `true` if it was clicked (caller flips its own bool and saves).
 pub fn toggle_switch(ui: &mut egui::Ui, on: bool) -> egui::Response {
@@ -109,8 +138,14 @@ pub fn toggle_switch(ui: &mut egui::Ui, on: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        let track_color = if on { ACCENT } else { egui::Color32::TRANSPARENT };
-        let track_stroke = if on { ACCENT_700 } else { DIVIDER };
+        // On-hover, nudge toward the "on" accent so the control visibly
+        // previews what a click would do, same idea as a CSS `:hover` rule.
+        let track_color = match (on, response.hovered()) {
+            (true, _) => ACCENT,
+            (false, true) => ACCENT_100,
+            (false, false) => egui::Color32::TRANSPARENT,
+        };
+        let track_stroke = if on || response.hovered() { ACCENT_700 } else { DIVIDER };
         painter.rect_filled(rect, 999.0, track_color);
         painter.rect_stroke(rect, 999.0, egui::Stroke::new(1.0_f32, track_stroke));
         let knob_x = if on {
@@ -139,6 +174,8 @@ pub fn chip(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
     if ui.is_rect_visible(rect) {
         let (fill, stroke, text_color) = if active {
             (ACCENT_100, ACCENT, ACCENT_700)
+        } else if response.hovered() {
+            (NEUTRAL_200, DIVIDER, TEXT)
         } else {
             (egui::Color32::TRANSPARENT, DIVIDER, TEXT)
         };

@@ -135,14 +135,19 @@ impl eframe::App for SettingsApp {
 
                 for (tab, icon, label) in TABS {
                     let active = self.tab == *tab;
+                    let row_size = egui::vec2(ui.available_width(), 32.0);
+                    let (rect, response) = ui.allocate_exact_size(row_size, egui::Sense::click());
+                    // Hover gets a faint tint distinct from the active fill,
+                    // so the nav feels responsive to the cursor rather than
+                    // only reacting on click — a small thing, but it's the
+                    // difference between a static list and a "live" UI.
                     let (fill, text_color) = if active {
                         (design::ACCENT_100, design::ACCENT_700)
+                    } else if response.hovered() {
+                        (design::NEUTRAL_200, design::TEXT)
                     } else {
                         (egui::Color32::TRANSPARENT, design::TEXT)
                     };
-
-                    let row_size = egui::vec2(ui.available_width(), 32.0);
-                    let (rect, response) = ui.allocate_exact_size(row_size, egui::Sense::click());
                     if ui.is_rect_visible(rect) {
                         let painter = ui.painter();
                         painter.rect_filled(rect, design::RADIUS_MD, fill);
@@ -178,16 +183,18 @@ impl eframe::App for SettingsApp {
             .frame(
                 egui::Frame::none()
                     .fill(design::BG)
-                    .inner_margin(egui::Margin::symmetric(36.0, 28.0)),
+                    .inner_margin(egui::Margin::symmetric(28.0, 24.0)),
             )
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
-                    Tab::General => self.general_tab(ui),
-                    Tab::Theme => self.theme_tab(ui),
-                    Tab::Sound => self.sound_tab(ui),
-                    Tab::Pomodoro => self.pomodoro_tab(ui),
-                    Tab::Schedule => self.schedule_tab(ui),
-                    Tab::Stats => self.stats_tab(ui),
+                design::card(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
+                        Tab::General => self.general_tab(ui),
+                        Tab::Theme => self.theme_tab(ui),
+                        Tab::Sound => self.sound_tab(ui),
+                        Tab::Pomodoro => self.pomodoro_tab(ui),
+                        Tab::Schedule => self.schedule_tab(ui),
+                        Tab::Stats => self.stats_tab(ui),
+                    });
                 });
             });
     }
