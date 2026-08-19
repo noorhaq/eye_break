@@ -2,6 +2,7 @@ mod config;
 mod exercises;
 mod monitors;
 mod overlay;
+mod pomodoro;
 mod raise;
 mod state;
 mod timer;
