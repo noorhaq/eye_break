@@ -81,6 +81,8 @@ impl eframe::App for OverlayApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        crate::theme::apply(ctx, Config::load().theme);
+
         if self.was_dismissed_elsewhere() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             std::process::exit(0);

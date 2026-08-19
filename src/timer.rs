@@ -69,6 +69,8 @@ impl eframe::App for TimerApp {
             self.last_poll = Instant::now();
         }
 
+        crate::theme::apply(ctx, self.cfg.theme);
+
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {

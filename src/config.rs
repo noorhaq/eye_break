@@ -1,3 +1,4 @@
+use crate::theme::Theme;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -17,6 +18,9 @@ pub struct Config {
     /// Whether to show the always-on corner countdown to the next break.
     #[serde(default = "default_true")]
     pub show_timer: bool,
+    /// Visual theme for the overlay and corner timer windows.
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 fn default_display_secs() -> u64 {
@@ -40,6 +44,7 @@ impl Default for Config {
             next_exercise: 0,
             snooze_secs: default_snooze_secs(),
             show_timer: default_true(),
+            theme: Theme::default(),
         }
     }
 }
