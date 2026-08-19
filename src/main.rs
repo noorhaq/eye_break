@@ -3,6 +3,7 @@ mod exercises;
 mod monitors;
 mod overlay;
 mod raise;
+mod sounds;
 mod state;
 mod timer;
 mod tray;
