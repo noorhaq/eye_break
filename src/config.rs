@@ -62,10 +62,28 @@ pub struct Config {
     /// The headline shown at the top of the break overlay.
     #[serde(default = "default_reminder_text")]
     pub reminder_text: String,
+
+    /// Whether to skip triggering a break while the active window appears
+    /// fullscreen (video calls, presentations, movies, ...).
+    #[serde(default = "default_true")]
+    pub fullscreen_pause_enabled: bool,
+    /// Whether to pause the break schedule while the system is idle (no
+    /// keyboard/mouse input for `idle_pause_after_mins`), so reminders
+    /// don't fire at an empty desk.
+    #[serde(default = "default_true")]
+    pub idle_pause_enabled: bool,
+    /// Minutes of no keyboard/mouse input before the system is considered
+    /// idle for the purposes of `idle_pause_enabled`.
+    #[serde(default = "default_idle_pause_after_mins")]
+    pub idle_pause_after_mins: u32,
 }
 
 fn default_reminder_text() -> String {
     "Time for an eye break!".to_string()
+}
+
+fn default_idle_pause_after_mins() -> u32 {
+    5
 }
 
 fn default_display_secs() -> u64 {
@@ -129,6 +147,9 @@ impl Default for Config {
             workday_end_hour: default_workday_end_hour(),
             workday_days: default_workday_days(),
             reminder_text: default_reminder_text(),
+            fullscreen_pause_enabled: default_true(),
+            idle_pause_enabled: default_true(),
+            idle_pause_after_mins: default_idle_pause_after_mins(),
         }
     }
 }

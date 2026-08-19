@@ -1,5 +1,7 @@
+use crate::activewindow;
 use crate::config::{self, Config};
 use crate::exercises;
+use crate::idle;
 use crate::monitors::list_monitors;
 use crate::pomodoro::{self, PomodoroState};
 use crate::state::{now_epoch, State};
@@ -157,6 +159,14 @@ pub fn run() {
     let pomodoro_state = Rc::new(RefCell::new(PomodoroState::load()));
     let mut usage_save_countdown: u32 = 0;
 
+    // Idle/fullscreen checks shell out to xprintidle/xdotool/xprop, so they
+    // aren't run every 500ms tick — only every ~2s, with the result cached
+    // for the ticks in between.
+    let mut smart_pause_countdown: u32 = 0;
+    let mut cached_is_idle = false;
+    let mut cached_is_fullscreen = false;
+    let mut was_idle = false;
+
     glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
         // Handle menu events.
         while let Ok(event) = menu_channel.try_recv() {
@@ -219,12 +229,40 @@ pub fn run() {
             }
         }
 
+        // Idle / fullscreen detection, throttled to every ~2s (4 ticks) since
+        // each check shells out to an external tool. Computed before the
+        // usage-stats and scheduler blocks below since both depend on it.
+        smart_pause_countdown += 1;
+        if smart_pause_countdown >= 4 {
+            smart_pause_countdown = 0;
+            let cfg = config.borrow();
+            cached_is_idle = cfg.idle_pause_enabled
+                && idle::idle_secs()
+                    .map(|secs| secs >= cfg.idle_pause_after_mins as u64 * 60)
+                    .unwrap_or(false);
+            cached_is_fullscreen =
+                cfg.fullscreen_pause_enabled && activewindow::is_fullscreen_app_active();
+        }
+
+        // On the idle -> active transition, reset the schedule's baseline to
+        // "now" rather than leaving it at whenever the last break was, so
+        // returning from being away doesn't immediately ambush the user with
+        // a break for time they weren't even at the desk for.
+        if cached_is_idle {
+            was_idle = true;
+        } else if was_idle {
+            was_idle = false;
+            let mut st = State::load();
+            st.last_break_epoch = now_epoch();
+            st.save();
+        }
+
         // Usage-stats: this tick fires every 500ms, so accumulate a whole
         // second every other tick (rather than double-counting by recording
         // 1s on every 500ms tick), and flush to disk every ~10s to keep disk
-        // writes light.
+        // writes light. Skipped while idle so "usage" reflects active time.
         usage_save_countdown += 1;
-        if usage_save_countdown % 2 == 0 {
+        if usage_save_countdown % 2 == 0 && !cached_is_idle {
             stats::record_tick(&mut usage_log.borrow_mut(), 1);
         }
         if usage_save_countdown >= 20 {
@@ -234,12 +272,17 @@ pub fn run() {
 
         // Scheduler tick, driven off the shared epoch-based state so that
         // skips/snoozes triggered from an overlay window are respected.
-        // Gated by the workday schedule (a no-op check when that's disabled),
-        // and driven by either the Pomodoro cycle or the plain interval
-        // scheduler, depending on which mode is active.
+        // Gated by the workday schedule, idle state, and fullscreen state
+        // (each a no-op when its own toggle is disabled), and driven by
+        // either the Pomodoro cycle or the plain interval scheduler,
+        // depending on which mode is active.
         let due = {
             let cfg = config.borrow();
-            if !cfg.enabled || !config::is_within_workday(&cfg) {
+            if !cfg.enabled
+                || !config::is_within_workday(&cfg)
+                || cached_is_idle
+                || cached_is_fullscreen
+            {
                 false
             } else if cfg.pomodoro_enabled {
                 pomodoro::pomodoro_due(&mut pomodoro_state.borrow_mut(), &cfg)

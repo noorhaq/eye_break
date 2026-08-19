@@ -293,6 +293,39 @@ impl eframe::App for SettingsApp {
                 ui.add_space(4.0);
                 ui.separator();
                 ui.add_space(4.0);
+                egui::CollapsingHeader::new("🧘  Smart pausing").show(ui, |ui| {
+                    let mut changed = false;
+                    changed |= ui
+                        .checkbox(
+                            &mut self.cfg.idle_pause_enabled,
+                            "Pause reminders while the system is idle",
+                        )
+                        .changed();
+                    ui.add_enabled_ui(self.cfg.idle_pause_enabled, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Idle after (min):");
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut self.cfg.idle_pause_after_mins)
+                                        .range(1..=60),
+                                )
+                                .changed();
+                        });
+                    });
+                    changed |= ui
+                        .checkbox(
+                            &mut self.cfg.fullscreen_pause_enabled,
+                            "Don't interrupt fullscreen apps (calls, presentations, video)",
+                        )
+                        .changed();
+                    if changed {
+                        self.save_cfg();
+                    }
+                });
+
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
                 egui::CollapsingHeader::new("📊  Usage stats").default_open(true).show(ui, |ui| {
                     let today = today_usage_secs(&self.usage);
                     ui.label(format!(

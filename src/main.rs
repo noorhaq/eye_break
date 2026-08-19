@@ -1,6 +1,8 @@
+mod activewindow;
 mod autostart;
 mod config;
 mod exercises;
+mod idle;
 mod monitors;
 mod overlay;
 mod pomodoro;
