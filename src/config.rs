@@ -25,6 +25,39 @@ pub struct Config {
     /// Notification sound to play when a break overlay is triggered.
     #[serde(default)]
     pub sound: sounds::SoundChoice,
+
+    /// Whether Pomodoro-technique scheduling is enabled (alternate/complementary
+    /// mode to the plain interval scheduler above). Off by default.
+    #[serde(default)]
+    pub pomodoro_enabled: bool,
+    /// Length of a Pomodoro work phase, in minutes.
+    #[serde(default = "default_pomodoro_work_mins")]
+    pub pomodoro_work_mins: u32,
+    /// Length of a short break, in minutes.
+    #[serde(default = "default_pomodoro_short_break_mins")]
+    pub pomodoro_short_break_mins: u32,
+    /// Length of a long break, in minutes.
+    #[serde(default = "default_pomodoro_long_break_mins")]
+    pub pomodoro_long_break_mins: u32,
+    /// Number of completed work cycles before a long break is taken.
+    #[serde(default = "default_pomodoro_cycles_before_long_break")]
+    pub pomodoro_cycles_before_long_break: u32,
+}
+
+fn default_pomodoro_work_mins() -> u32 {
+    25
+}
+
+fn default_pomodoro_short_break_mins() -> u32 {
+    5
+}
+
+fn default_pomodoro_long_break_mins() -> u32 {
+    15
+}
+
+fn default_pomodoro_cycles_before_long_break() -> u32 {
+    4
 }
 
 fn default_display_secs() -> u64 {
@@ -50,6 +83,11 @@ impl Default for Config {
             show_timer: default_true(),
             theme: Theme::default(),
             sound: sounds::SoundChoice::default(),
+            pomodoro_enabled: false,
+            pomodoro_work_mins: default_pomodoro_work_mins(),
+            pomodoro_short_break_mins: default_pomodoro_short_break_mins(),
+            pomodoro_long_break_mins: default_pomodoro_long_break_mins(),
+            pomodoro_cycles_before_long_break: default_pomodoro_cycles_before_long_break(),
         }
     }
 }
