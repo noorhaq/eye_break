@@ -73,6 +73,18 @@ impl OverlayApp {
         st.dismiss_token += 1;
         st.save();
     }
+
+    /// "OK, I'm done" — dismiss right now without waiting out the timer, but
+    /// (unlike Skip) without pushing the next break out by the snooze
+    /// length. `trigger_break` already stamped `last_break_epoch` when this
+    /// overlay was spawned, so the next break stays on its normal schedule;
+    /// this just closes the window(s) early. Bumping `dismiss_token` closes
+    /// sibling overlays on other monitors too, same as Skip does.
+    fn acknowledge(&self) {
+        let mut st = State::load();
+        st.dismiss_token += 1;
+        st.save();
+    }
 }
 
 impl eframe::App for OverlayApp {
@@ -160,36 +172,65 @@ impl eframe::App for OverlayApp {
                     egui::Color32::from_rgba_unmultiplied(180, 180, 180, (255.0 * alpha) as u8),
                 );
 
-                // Skip / snooze button, centered near the bottom.
-                let button_size = egui::vec2(260.0, 40.0);
-                let button_rect = egui::Rect::from_center_size(
-                    egui::pos2(center.x, screen.bottom() - 70.0),
-                    button_size,
+                // Two buttons side by side, centered near the bottom: "OK,
+                // I'm done" dismisses right now with no effect on the next
+                // break's schedule; "Skip" also dismisses now but pushes the
+                // next break out by the snooze length.
+                let ok_size = egui::vec2(180.0, 40.0);
+                let skip_size = egui::vec2(230.0, 40.0);
+                let gap = 12.0;
+                let total_w = ok_size.x + gap + skip_size.x;
+                let row_y = screen.bottom() - 70.0;
+                let ok_rect = egui::Rect::from_center_size(
+                    egui::pos2(center.x - total_w / 2.0 + ok_size.x / 2.0, row_y),
+                    ok_size,
                 );
-                let snooze_min = Config::load().snooze_secs / 60;
-                let button = egui::Button::new(
-                    egui::RichText::new(format!("Skip — remind me in {snooze_min} min"))
-                        .size(16.0)
-                        .color(egui::Color32::from_rgba_unmultiplied(
-                            255,
-                            255,
-                            255,
-                            (255.0 * alpha) as u8,
-                        )),
-                )
-                .fill(egui::Color32::from_rgba_unmultiplied(
-                    255,
-                    255,
-                    255,
-                    (30.0 * alpha) as u8,
-                ))
-                .stroke(egui::Stroke::new(
-                    1.0_f32,
-                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, (120.0 * alpha) as u8),
-                ))
-                .rounding(8.0);
+                let skip_rect = egui::Rect::from_center_size(
+                    egui::pos2(center.x + total_w / 2.0 - skip_size.x / 2.0, row_y),
+                    skip_size,
+                );
 
-                if ui.put(button_rect, button).clicked() {
+                let text_alpha = (255.0 * alpha) as u8;
+                let make_button = |label: String, fill: u8| {
+                    egui::Button::new(
+                        egui::RichText::new(label)
+                            .size(16.0)
+                            .color(egui::Color32::from_rgba_unmultiplied(
+                                255, 255, 255, text_alpha,
+                            )),
+                    )
+                    .fill(egui::Color32::from_rgba_unmultiplied(
+                        255,
+                        255,
+                        255,
+                        (fill as f32 * alpha) as u8,
+                    ))
+                    .stroke(egui::Stroke::new(
+                        1.0_f32,
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, (120.0 * alpha) as u8),
+                    ))
+                    .rounding(8.0)
+                };
+
+                // "OK" is the primary action — filled brighter so it reads as
+                // the default choice for someone who just wants to move on.
+                if ui
+                    .put(ok_rect, make_button("OK, I'm done".to_string(), 70))
+                    .clicked()
+                {
+                    self.acknowledge();
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    std::process::exit(0);
+                }
+
+                let snooze_min = Config::load().snooze_secs / 60;
+                if ui
+                    .put(
+                        skip_rect,
+                        make_button(format!("Skip — remind me in {snooze_min} min"), 30),
+                    )
+                    .clicked()
+                {
                     self.skip();
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     std::process::exit(0);

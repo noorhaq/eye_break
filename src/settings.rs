@@ -6,7 +6,7 @@
 
 use crate::config::Config;
 use crate::sounds::SoundChoice;
-use crate::stats::{today_usage_secs, usage_last_n_days, UsageLog};
+use crate::stats::{today_usage_secs, usage_last_n_days, DailyUsage, UsageLog};
 use crate::theme::{self, Theme};
 use crate::{autostart, updater};
 use eframe::egui;
@@ -60,12 +60,27 @@ impl eframe::App for SettingsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         theme::apply(ctx, self.cfg.theme);
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().inner_margin(egui::Margin::symmetric(20.0, 16.0)))
+            .show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.heading("Eye Break Settings");
-                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("👁").size(28.0));
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new("Eye Break")
+                            .size(24.0)
+                            .strong(),
+                    );
+                });
+                ui.label(
+                    egui::RichText::new("Settings")
+                        .size(13.0)
+                        .color(ui.visuals().weak_text_color()),
+                );
+                ui.add_space(12.0);
 
-                ui.collapsing("General", |ui| {
+                egui::CollapsingHeader::new("⚙  General").default_open(true).show(ui, |ui| {
                     let mut changed = false;
                     changed |= ui.checkbox(&mut self.cfg.enabled, "Enabled").changed();
                     changed |= ui
@@ -104,7 +119,10 @@ impl eframe::App for SettingsApp {
                     }
                 });
 
-                ui.collapsing("Theme", |ui| {
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+                egui::CollapsingHeader::new("🎨  Theme").show(ui, |ui| {
                     let mut changed = false;
                     egui::ComboBox::from_label("Theme")
                         .selected_text(self.cfg.theme.label())
@@ -123,7 +141,10 @@ impl eframe::App for SettingsApp {
                     }
                 });
 
-                ui.collapsing("Sound", |ui| {
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+                egui::CollapsingHeader::new("🔔  Sound").show(ui, |ui| {
                     let mut changed = false;
                     let current_label = match &self.cfg.sound {
                         SoundChoice::None => "None",
@@ -178,7 +199,10 @@ impl eframe::App for SettingsApp {
                     }
                 });
 
-                ui.collapsing("Pomodoro", |ui| {
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+                egui::CollapsingHeader::new("🍅  Pomodoro").show(ui, |ui| {
                     let mut changed = false;
                     changed |= ui
                         .checkbox(&mut self.cfg.pomodoro_enabled, "Enable Pomodoro mode")
@@ -225,7 +249,10 @@ impl eframe::App for SettingsApp {
                     }
                 });
 
-                ui.collapsing("Workday schedule", |ui| {
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+                egui::CollapsingHeader::new("🗓  Workday schedule").show(ui, |ui| {
                     let mut changed = false;
                     changed |= ui
                         .checkbox(&mut self.cfg.workday_enabled, "Only remind during workday hours")
@@ -263,26 +290,24 @@ impl eframe::App for SettingsApp {
                     }
                 });
 
-                ui.collapsing("Usage stats", |ui| {
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+                egui::CollapsingHeader::new("📊  Usage stats").default_open(true).show(ui, |ui| {
                     let today = today_usage_secs(&self.usage);
                     ui.label(format!(
                         "Today's device usage: {}h {}m",
                         today / 3600,
                         (today % 3600) / 60
                     ));
-                    ui.add_space(4.0);
-                    ui.label("Last 7 days:");
-                    for day in usage_last_n_days(&self.usage, 7) {
-                        ui.label(format!(
-                            "  {}: {}h {}m",
-                            day.date,
-                            day.active_secs / 3600,
-                            (day.active_secs % 3600) / 60
-                        ));
-                    }
+                    ui.add_space(8.0);
+                    usage_bar_chart(ui, &usage_last_n_days(&self.usage, 7));
                 });
 
-                ui.collapsing("Startup & updates", |ui| {
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+                egui::CollapsingHeader::new("🚀  Startup & updates").show(ui, |ui| {
                     let mut enabled = self.autostart_enabled;
                     if ui.checkbox(&mut enabled, "Run on startup").changed() {
                         let _ = autostart::set_enabled(enabled);
@@ -309,5 +334,75 @@ impl eframe::App for SettingsApp {
         // Usage stats/tick updates aren't relevant to this window's own
         // lifetime — it's a settings dialog, not the long-running scheduler.
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+}
+
+/// A simple daily-usage bar chart, painted by hand (no charting crate) so
+/// it's trivial to restyle once a real design lands — colors come straight
+/// from `ui.visuals()`, and the whole thing is one self-contained function.
+/// Hovering a bar shows the exact date/duration in a tooltip.
+fn usage_bar_chart(ui: &mut egui::Ui, days: &[DailyUsage]) {
+    if days.is_empty() {
+        ui.label("No usage recorded yet.");
+        return;
+    }
+
+    const CHART_HEIGHT: f32 = 140.0;
+    const BAR_GAP: f32 = 10.0;
+    const LABEL_HEIGHT: f32 = 18.0;
+
+    let desired_size = egui::vec2(ui.available_width(), CHART_HEIGHT + LABEL_HEIGHT);
+    let (rect, _response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+
+    let max_secs = days.iter().map(|d| d.active_secs).max().unwrap_or(1).max(1);
+    let bar_count = days.len() as f32;
+    let bar_w = (rect.width() - BAR_GAP * (bar_count - 1.0).max(0.0)) / bar_count;
+
+    let accent = ui.visuals().selection.bg_fill;
+    let track = ui.visuals().widgets.noninteractive.bg_fill;
+    let text_color = ui.visuals().text_color();
+
+    for (i, day) in days.iter().enumerate() {
+        let x0 = rect.left() + i as f32 * (bar_w + BAR_GAP);
+        let x1 = x0 + bar_w;
+
+        let bar_h = CHART_HEIGHT * (day.active_secs as f32 / max_secs as f32).clamp(0.02, 1.0);
+        let track_rect =
+            egui::Rect::from_min_max(egui::pos2(x0, rect.top()), egui::pos2(x1, rect.top() + CHART_HEIGHT));
+        let bar_rect = egui::Rect::from_min_max(
+            egui::pos2(x0, rect.top() + CHART_HEIGHT - bar_h),
+            egui::pos2(x1, rect.top() + CHART_HEIGHT),
+        );
+
+        painter.rect_filled(track_rect, 3.0, track);
+        painter.rect_filled(bar_rect, 3.0, accent);
+
+        // Day label (short weekday-ish suffix of the ISO date) under the bar.
+        let short_label = day.date.get(5..).unwrap_or(&day.date); // "MM-DD"
+        painter.text(
+            egui::pos2(x0 + bar_w / 2.0, rect.top() + CHART_HEIGHT + LABEL_HEIGHT / 2.0),
+            egui::Align2::CENTER_CENTER,
+            short_label,
+            egui::FontId::proportional(11.0),
+            text_color,
+        );
+
+        // Hover tooltip with the exact value.
+        let hover_response = ui.interact(
+            track_rect,
+            ui.id().with(("usage-bar", i)),
+            egui::Sense::hover(),
+        );
+        if hover_response.hovered() {
+            egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("usage-tip"), |ui| {
+                ui.label(format!(
+                    "{}: {}h {}m",
+                    day.date,
+                    day.active_secs / 3600,
+                    (day.active_secs % 3600) / 60
+                ));
+            });
+        }
     }
 }
