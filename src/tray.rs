@@ -1,7 +1,9 @@
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::exercises;
 use crate::monitors::list_monitors;
+use crate::pomodoro::{self, PomodoroState};
 use crate::state::{now_epoch, State};
+use crate::stats::{self, UsageLog};
 use std::cell::RefCell;
 use std::process::Child;
 use std::rc::Rc;
@@ -99,6 +101,7 @@ pub fn run() {
 
     let break_now_item = MenuItem::new("Take a break now", true, None);
     let skip_item = MenuItem::new("Skip next break (snooze)", true, None);
+    let settings_item = MenuItem::new("Settings…", true, None);
     let quit_item = MenuItem::new("Quit", true, None);
 
     menu.append(&toggle_item).unwrap();
@@ -111,12 +114,15 @@ pub fn run() {
     menu.append(&break_now_item).unwrap();
     menu.append(&skip_item).unwrap();
     menu.append(&PredefinedMenuItem::separator()).unwrap();
+    menu.append(&settings_item).unwrap();
+    menu.append(&PredefinedMenuItem::separator()).unwrap();
     menu.append(&quit_item).unwrap();
 
     let toggle_id = toggle_item.id().clone();
     let timer_id = timer_item.id().clone();
     let break_now_id = break_now_item.id().clone();
     let skip_id = skip_item.id().clone();
+    let settings_id = settings_item.id().clone();
     let quit_id = quit_item.id().clone();
     let interval_ids: Vec<_> = interval_items
         .iter()
@@ -147,6 +153,10 @@ pub fn run() {
     let exe_tick = exe.clone();
     let timer_child_tick = timer_child.clone();
 
+    let usage_log = Rc::new(RefCell::new(UsageLog::load()));
+    let pomodoro_state = Rc::new(RefCell::new(PomodoroState::load()));
+    let mut usage_save_countdown: u32 = 0;
+
     glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
         // Handle menu events.
         while let Ok(event) = menu_channel.try_recv() {
@@ -175,6 +185,8 @@ pub fn run() {
                 st.dismiss_token += 1;
                 st.save();
                 println!("[eye-break] next break snoozed by {}s", cfg.snooze_secs);
+            } else if event.id == settings_id {
+                let _ = std::process::Command::new(&exe_tick).arg("--settings").spawn();
             } else if event.id == quit_id {
                 if let Some(mut child) = timer_child_tick.borrow_mut().take() {
                     let _ = child.kill();
@@ -207,11 +219,33 @@ pub fn run() {
             }
         }
 
+        // Usage-stats: this tick fires every 500ms, so accumulate a whole
+        // second every other tick (rather than double-counting by recording
+        // 1s on every 500ms tick), and flush to disk every ~10s to keep disk
+        // writes light.
+        usage_save_countdown += 1;
+        if usage_save_countdown % 2 == 0 {
+            stats::record_tick(&mut usage_log.borrow_mut(), 1);
+        }
+        if usage_save_countdown >= 20 {
+            usage_save_countdown = 0;
+            usage_log.borrow().save();
+        }
+
         // Scheduler tick, driven off the shared epoch-based state so that
         // skips/snoozes triggered from an overlay window are respected.
+        // Gated by the workday schedule (a no-op check when that's disabled),
+        // and driven by either the Pomodoro cycle or the plain interval
+        // scheduler, depending on which mode is active.
         let due = {
             let cfg = config.borrow();
-            cfg.enabled && now_epoch() >= State::load().next_break_epoch(cfg.interval_secs)
+            if !cfg.enabled || !config::is_within_workday(&cfg) {
+                false
+            } else if cfg.pomodoro_enabled {
+                pomodoro::pomodoro_due(&mut pomodoro_state.borrow_mut(), &cfg)
+            } else {
+                now_epoch() >= State::load().next_break_epoch(cfg.interval_secs)
+            }
         };
         if due {
             let mut cfg = config.borrow_mut();

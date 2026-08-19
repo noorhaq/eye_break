@@ -5,6 +5,7 @@ mod monitors;
 mod overlay;
 mod pomodoro;
 mod raise;
+mod settings;
 mod sounds;
 mod state;
 mod stats;
@@ -37,6 +38,10 @@ fn main() {
         Some("--timer") => {
             // Internal mode: the persistent corner countdown window.
             let _ = timer::run_timer();
+        }
+        Some("--settings") => {
+            // The full settings window, spawned by the tray's "Settings…" item.
+            let _ = settings::run_settings();
         }
         Some("enable") => {
             let mut cfg = Config::load();
