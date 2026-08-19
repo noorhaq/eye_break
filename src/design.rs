@@ -31,6 +31,56 @@ pub const RADIUS_MD: f32 = 4.0;
 #[allow(dead_code)]
 pub const RADIUS_LG: f32 = 7.0;
 
+/// The design's serif display face (headings, big numbers), embedded from
+/// Google Fonts (OFL-licensed) rather than relying on whatever serif the
+/// system happens to have — the whole point of this design is a specific
+/// editorial feel, which a generic system serif substitute wouldn't give.
+pub const HEADING_FONT: &str = "cormorant-garamond";
+/// The design's serif body/UI face — replaces egui's default sans-serif for
+/// all normal text in this window, same reasoning as `HEADING_FONT`.
+pub const BODY_FONT: &str = "lora";
+
+/// Registers the Classical design's fonts and installs `install_fonts`'s
+/// `BODY_FONT` as the default proportional family. Call this once, at
+/// window creation (from the `run_native` creation closure) — NOT every
+/// frame from `apply()`, since rebuilding the font atlas is expensive.
+pub fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+
+    fonts.font_data.insert(
+        HEADING_FONT.to_owned(),
+        egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/CormorantGaramond-SemiBold.ttf"
+        )),
+    );
+    fonts.font_data.insert(
+        BODY_FONT.to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/Lora-Regular.ttf")),
+    );
+
+    fonts
+        .families
+        .entry(egui::FontFamily::Name(HEADING_FONT.into()))
+        .or_default()
+        .insert(0, HEADING_FONT.to_owned());
+
+    // Lora replaces the default proportional family so ordinary labels,
+    // buttons, and inputs pick it up automatically without every call site
+    // needing to opt in.
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, BODY_FONT.to_owned());
+
+    ctx.set_fonts(fonts);
+}
+
+/// `FontId` for the heading/display face at a given size.
+pub fn heading_font(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name(HEADING_FONT.into()))
+}
+
 /// Applies the Classical chrome to an egui context — call once per frame
 /// before drawing the settings window's panels.
 pub fn apply(ctx: &egui::Context) {
@@ -53,17 +103,24 @@ pub fn apply(ctx: &egui::Context) {
 /// A toggle switch matching the design's pill track + circular knob.
 /// Returns `true` if it was clicked (caller flips its own bool and saves).
 pub fn toggle_switch(ui: &mut egui::Ui, on: bool) -> egui::Response {
-    let size = egui::vec2(36.0, 20.0);
+    const KNOB_R: f32 = 6.0;
+    const KNOB_GAP: f32 = 2.0;
+    let size = egui::vec2(34.0, 18.0);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let track_color = if on { ACCENT } else { egui::Color32::TRANSPARENT };
+        let track_stroke = if on { ACCENT_700 } else { DIVIDER };
         painter.rect_filled(rect, 999.0, track_color);
-        painter.rect_stroke(rect, 999.0, egui::Stroke::new(1.0_f32, DIVIDER));
-        let knob_x = if on { rect.right() - 16.0 } else { rect.left() + 9.0 };
+        painter.rect_stroke(rect, 999.0, egui::Stroke::new(1.0_f32, track_stroke));
+        let knob_x = if on {
+            rect.right() - KNOB_R - KNOB_GAP
+        } else {
+            rect.left() + KNOB_R + KNOB_GAP
+        };
         let knob_center = egui::pos2(knob_x, rect.center().y);
         let knob_color = if on { egui::Color32::WHITE } else { NEUTRAL_600 };
-        painter.circle_filled(knob_center, 7.0, knob_color);
+        painter.circle_filled(knob_center, KNOB_R, knob_color);
     }
     response
 }
@@ -170,7 +227,7 @@ pub fn radial_gauge(ui: &mut egui::Ui, diameter: f32, fraction: f32, big_text: &
         center + egui::vec2(0.0, -diameter * 0.06),
         egui::Align2::CENTER_CENTER,
         big_text,
-        egui::FontId::proportional(diameter * 0.18),
+        heading_font(diameter * 0.18),
         TEXT,
     );
     painter.text(
@@ -282,4 +339,135 @@ pub fn clock_face(ui: &mut egui::Ui, diameter: f32, start_frac_of_12h: f32, end_
             NEUTRAL_600,
         );
     }
+}
+
+/// Which sidebar nav icon to draw — one per settings tab.
+#[derive(Clone, Copy, PartialEq)]
+pub enum NavIcon {
+    General,
+    Theme,
+    Sound,
+    Pomodoro,
+    Schedule,
+    Stats,
+}
+
+/// Draws one of the sidebar's line-art icons, geometry taken directly from
+/// the design's inline SVGs (each defined on a 24x24 viewBox, 1.8px
+/// stroke, round caps/joins) rather than approximated — so the nav matches
+/// the design pixel-for-pixel rather than substituting emoji, which can't
+/// be recolored to a single line weight/color the way these need to be.
+pub fn nav_icon(painter: &egui::Painter, rect: egui::Rect, icon: NavIcon, color: egui::Color32) {
+    // Map a design-space (0..24) point to screen space within `rect`.
+    let s = rect.width() / 24.0;
+    let p = |x: f32, y: f32| rect.left_top() + egui::vec2(x * s, y * s);
+    let stroke = egui::Stroke::new((1.8 * s).max(1.0), color);
+    let line = |painter: &egui::Painter, a: (f32, f32), b: (f32, f32)| {
+        painter.line_segment([p(a.0, a.1), p(b.0, b.1)], stroke);
+    };
+    let circle = |painter: &egui::Painter, c: (f32, f32), r: f32| {
+        painter.circle_stroke(p(c.0, c.1), r * s, stroke);
+    };
+
+    match icon {
+        NavIcon::General => {
+            // Three vertical sliders with handle dots.
+            line(painter, (5.0, 21.0), (5.0, 10.0));
+            line(painter, (5.0, 6.0), (5.0, 3.0));
+            line(painter, (12.0, 21.0), (12.0, 14.0));
+            line(painter, (12.0, 10.0), (12.0, 3.0));
+            line(painter, (19.0, 21.0), (19.0, 16.0));
+            line(painter, (19.0, 12.0), (19.0, 3.0));
+            circle(painter, (5.0, 8.0), 2.0);
+            circle(painter, (12.0, 12.0), 2.0);
+            circle(painter, (19.0, 14.0), 2.0);
+        }
+        NavIcon::Theme => {
+            // Painter's palette: a thumb-hole horseshoe (an open arc rather
+            // than a full circle, so it actually reads as a palette and not
+            // a wheel) plus three paint-well dots.
+            let pts: Vec<egui::Pos2> = (0..=28)
+                .map(|i| {
+                    let t = 35.0 + (360.0 - 70.0) * (i as f32 / 28.0);
+                    let rad = t.to_radians();
+                    p(12.0, 12.5) + egui::vec2(8.5 * rad.cos(), 8.5 * rad.sin()) * s
+                })
+                .collect();
+            painter.add(egui::Shape::line(pts, stroke));
+            circle(painter, (7.5, 10.5), 1.1);
+            circle(painter, (10.5, 6.8), 1.1);
+            circle(painter, (15.2, 8.2), 1.1);
+        }
+        NavIcon::Sound => {
+            // Bell: a proper dome (half-circle arc) flaring into a funnel
+            // base, plus the clapper.
+            let dome: Vec<egui::Pos2> = (0..=20)
+                .map(|i| {
+                    let t = 180.0 + 180.0 * (i as f32 / 20.0);
+                    let rad = t.to_radians();
+                    p(12.0, 9.0) + egui::vec2(5.5 * rad.cos(), 5.5 * rad.sin()) * s
+                })
+                .collect();
+            painter.add(egui::Shape::line(dome, stroke));
+            line(painter, (6.5, 9.0), (4.0, 15.0));
+            line(painter, (17.5, 9.0), (20.0, 15.0));
+            line(painter, (4.0, 15.0), (20.0, 15.0));
+            let clapper: Vec<egui::Pos2> = (0..=10)
+                .map(|i| {
+                    let t = 180.0 + 180.0 * (i as f32 / 10.0);
+                    let rad = t.to_radians();
+                    p(12.0, 15.0) + egui::vec2(2.2 * rad.cos(), 2.2 * rad.sin()) * s
+                })
+                .collect();
+            painter.add(egui::Shape::line(clapper, stroke));
+        }
+        NavIcon::Pomodoro => {
+            // Timer: circle face, hand, top stem.
+            circle(painter, (12.0, 13.0), 8.0);
+            line(painter, (12.0, 13.0), (12.0, 9.0));
+            line(painter, (9.0, 3.0), (15.0, 3.0));
+        }
+        NavIcon::Schedule => {
+            // Calendar: rounded rect body, header rule, binder rings.
+            let body = egui::Rect::from_min_max(p(3.0, 5.0), p(21.0, 21.0));
+            painter.rect_stroke(body, (2.0 * s).max(1.0), stroke);
+            line(painter, (3.0, 10.0), (21.0, 10.0));
+            line(painter, (8.0, 3.0), (8.0, 7.0));
+            line(painter, (16.0, 3.0), (16.0, 7.0));
+        }
+        NavIcon::Stats => {
+            // Bar chart: three bars, ascending.
+            line(painter, (4.0, 21.0), (4.0, 13.0));
+            line(painter, (12.0, 21.0), (12.0, 6.0));
+            line(painter, (20.0, 21.0), (20.0, 10.0));
+        }
+    }
+}
+
+/// The brand mark — an eye glyph (outline + pupil circle), matching the
+/// design's sidebar header icon.
+pub fn eye_icon(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    let s = rect.width() / 24.0;
+    let p = |x: f32, y: f32| rect.left_top() + egui::vec2(x * s, y * s);
+    let stroke = egui::Stroke::new((1.8 * s).max(1.0), color);
+    // Outline: two shallow arcs meeting at the corners, approximated as a
+    // stretched circle clipped isn't trivial in egui, so we draw it as an
+    // explicit polyline through the same control points the SVG path
+    // implies (a lens/eye shape).
+    let pts: Vec<egui::Pos2> = [
+        (2.0, 12.0),
+        (6.0, 6.0),
+        (12.0, 5.0),
+        (18.0, 6.0),
+        (22.0, 12.0),
+        (18.0, 18.0),
+        (12.0, 19.0),
+        (6.0, 18.0),
+        (2.0, 12.0),
+    ]
+    .iter()
+    .map(|&(x, y)| p(x, y))
+    .collect();
+    painter.add(egui::Shape::line(pts, stroke));
+    painter.circle_stroke(p(12.0, 12.0), 3.0 * s, stroke);
 }

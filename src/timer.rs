@@ -1,16 +1,18 @@
 use crate::config::Config;
+use crate::design;
 use crate::monitors::primary_monitor;
 use crate::state::{now_epoch, State};
 use eframe::egui;
 use std::time::{Duration, Instant};
 
-const WIN_W: f32 = 210.0;
-const WIN_H: f32 = 54.0;
+const WIN_W: f32 = 230.0;
+const WIN_H: f32 = 62.0;
 const MARGIN: f32 = 16.0;
 
-/// A small always-on-top pill in the corner of the primary monitor showing
-/// "Next break in MM:SS". Runs as its own long-lived process so it doesn't
-/// have to share an event loop with the GTK-driven tray icon.
+/// A small always-on-top card in the corner of the primary monitor showing
+/// a progress ring + "NEXT BREAK IN mm:ss", styled to match the Settings
+/// window's Classical design. Runs as its own long-lived process so it
+/// doesn't have to share an event loop with the GTK-driven tray icon.
 pub fn run_timer() -> eframe::Result<()> {
     crate::raise::keep_on_top_in_background();
 
@@ -37,7 +39,10 @@ pub fn run_timer() -> eframe::Result<()> {
     eframe::run_native(
         "eye-break-timer",
         options,
-        Box::new(|_cc| Ok(Box::new(TimerApp::new()))),
+        Box::new(|cc| {
+            design::install_fonts(&cc.egui_ctx);
+            Ok(Box::new(TimerApp::new()))
+        }),
     )
 }
 
@@ -57,6 +62,20 @@ impl TimerApp {
     }
 }
 
+/// Scales a color's RGBA channels uniformly by `factor` (0.0-1.0), giving a
+/// correctly-premultiplied faded color — used for the "corner timer
+/// opacity" setting, since the card's whole visual weight (not just its
+/// background fill) should fade together.
+fn faded(c: egui::Color32, factor: f32) -> egui::Color32 {
+    let f = factor.clamp(0.0, 1.0);
+    egui::Color32::from_rgba_premultiplied(
+        (c.r() as f32 * f) as u8,
+        (c.g() as f32 * f) as u8,
+        (c.b() as f32 * f) as u8,
+        (c.a() as f32 * f) as u8,
+    )
+}
+
 impl eframe::App for TimerApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
@@ -69,35 +88,85 @@ impl eframe::App for TimerApp {
             self.last_poll = Instant::now();
         }
 
-        crate::theme::apply(ctx, self.cfg.theme);
+        let op = self.cfg.corner_timer_opacity;
 
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
                 let rect = ui.max_rect();
-                let bg = egui::Color32::from_rgba_unmultiplied(20, 20, 20, 165);
-                ui.painter()
-                    .rect_filled(rect, egui::Rounding::same(10.0), bg);
+                let painter = ui.painter();
 
-                let text = if !self.cfg.enabled {
-                    "Eye Break: paused".to_string()
-                } else {
-                    let next = self.state.next_break_epoch(self.cfg.interval_secs);
-                    let remaining = next.saturating_sub(now_epoch());
-                    format!(
-                        "👁 Next break in {:02}:{:02}",
-                        remaining / 60,
-                        remaining % 60
-                    )
-                };
-
-                ui.painter().text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    text,
-                    egui::FontId::proportional(15.0),
-                    egui::Color32::from_rgb(235, 235, 235),
+                painter.rect_filled(rect, egui::Rounding::same(design::RADIUS_LG), faded(design::BG, op));
+                painter.rect_stroke(
+                    rect,
+                    egui::Rounding::same(design::RADIUS_LG),
+                    egui::Stroke::new(1.0_f32, faded(design::DIVIDER, op)),
                 );
+
+                let ring_center = rect.left_center() + egui::vec2(30.0, 0.0);
+                let ring_r = 17.0;
+
+                if !self.cfg.enabled {
+                    painter.circle_stroke(
+                        ring_center,
+                        ring_r,
+                        egui::Stroke::new(3.0_f32, faded(design::DIVIDER, op)),
+                    );
+                    painter.text(
+                        ring_center,
+                        egui::Align2::CENTER_CENTER,
+                        "⏸",
+                        egui::FontId::proportional(13.0),
+                        faded(design::NEUTRAL_600, op),
+                    );
+                    painter.text(
+                        rect.left_center() + egui::vec2(56.0, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        "Eye Break paused",
+                        design::heading_font(15.0),
+                        faded(design::TEXT, op),
+                    );
+                } else {
+                    let interval = self.cfg.interval_secs.max(1);
+                    let next = self.state.next_break_epoch(interval);
+                    let remaining = next.saturating_sub(now_epoch());
+                    let elapsed_frac = 1.0 - (remaining as f32 / interval as f32).clamp(0.0, 1.0);
+
+                    painter.circle_stroke(
+                        ring_center,
+                        ring_r,
+                        egui::Stroke::new(3.0_f32, faded(design::DIVIDER, op)),
+                    );
+                    let start_deg = -90.0_f32;
+                    let end_deg = start_deg + elapsed_frac * 360.0;
+                    let steps = 32;
+                    let pts: Vec<egui::Pos2> = (0..=steps)
+                        .map(|i| {
+                            let t = start_deg + (end_deg - start_deg) * (i as f32 / steps as f32);
+                            let rad = t.to_radians();
+                            ring_center + egui::vec2(ring_r * rad.cos(), ring_r * rad.sin())
+                        })
+                        .collect();
+                    if pts.len() > 1 {
+                        painter.add(egui::Shape::line(pts, egui::Stroke::new(3.0_f32, faded(design::ACCENT, op))));
+                    }
+
+                    let label_pos = rect.left_center() + egui::vec2(56.0, -9.0);
+                    painter.text(
+                        label_pos,
+                        egui::Align2::LEFT_CENTER,
+                        "NEXT BREAK IN",
+                        egui::FontId::proportional(10.5),
+                        faded(design::NEUTRAL_600, op),
+                    );
+                    painter.text(
+                        label_pos + egui::vec2(0.0, 17.0),
+                        egui::Align2::LEFT_CENTER,
+                        format!("{:02}:{:02}", remaining / 60, remaining % 60),
+                        design::heading_font(19.0),
+                        faded(design::TEXT, op),
+                    );
+                }
             });
 
         ctx.request_repaint_after(Duration::from_millis(500));

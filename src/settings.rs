@@ -33,7 +33,12 @@ pub fn run_settings() -> eframe::Result<()> {
     eframe::run_native(
         "eye-break-settings",
         options,
-        Box::new(|_cc| Ok(Box::new(SettingsApp::new()))),
+        Box::new(|cc| {
+            // Font atlas rebuilds are expensive — install once here, not
+            // every frame from design::apply().
+            design::install_fonts(&cc.egui_ctx);
+            Ok(Box::new(SettingsApp::new()))
+        }),
     )
 }
 
@@ -47,13 +52,13 @@ enum Tab {
     Stats,
 }
 
-const TABS: &[(Tab, &str, &str)] = &[
-    (Tab::General, "⚙", "General"),
-    (Tab::Theme, "🎨", "Theme"),
-    (Tab::Sound, "🔔", "Sound"),
-    (Tab::Pomodoro, "🍅", "Pomodoro"),
-    (Tab::Schedule, "🗓", "Schedule"),
-    (Tab::Stats, "📊", "Stats"),
+const TABS: &[(Tab, design::NavIcon, &str)] = &[
+    (Tab::General, design::NavIcon::General, "General"),
+    (Tab::Theme, design::NavIcon::Theme, "Theme"),
+    (Tab::Sound, design::NavIcon::Sound, "Sound"),
+    (Tab::Pomodoro, design::NavIcon::Pomodoro, "Pomodoro"),
+    (Tab::Schedule, design::NavIcon::Schedule, "Schedule"),
+    (Tab::Stats, design::NavIcon::Stats, "Stats"),
 ];
 
 const INTERVAL_PRESETS_MIN: &[u64] = &[10, 15, 20, 30, 45, 60, 90, 120];
@@ -103,13 +108,14 @@ impl eframe::App for SettingsApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("👁").size(20.0).color(design::ACCENT_700));
+                    let (eye_rect, _resp) =
+                        ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+                    design::eye_icon(ui.painter(), eye_rect, design::ACCENT_700);
                     ui.add_space(4.0);
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new("Eye Break")
-                                .size(16.0)
-                                .strong()
+                                .font(design::heading_font(16.0))
                                 .color(design::TEXT),
                         );
                         ui.label(
@@ -134,15 +140,26 @@ impl eframe::App for SettingsApp {
                     } else {
                         (egui::Color32::TRANSPARENT, design::TEXT)
                     };
-                    let text = egui::RichText::new(format!("{icon}  {label}"))
-                        .size(13.5)
-                        .color(text_color);
-                    let button = egui::Button::new(text)
-                        .fill(fill)
-                        .stroke(egui::Stroke::NONE)
-                        .rounding(design::RADIUS_MD)
-                        .min_size(egui::vec2(ui.available_width(), 0.0));
-                    if ui.add(button).clicked() {
+
+                    let row_size = egui::vec2(ui.available_width(), 32.0);
+                    let (rect, response) = ui.allocate_exact_size(row_size, egui::Sense::click());
+                    if ui.is_rect_visible(rect) {
+                        let painter = ui.painter();
+                        painter.rect_filled(rect, design::RADIUS_MD, fill);
+                        let icon_rect = egui::Rect::from_min_size(
+                            rect.left_top() + egui::vec2(10.0, 8.0),
+                            egui::vec2(16.0, 16.0),
+                        );
+                        design::nav_icon(painter, icon_rect, *icon, text_color);
+                        painter.text(
+                            rect.left_center() + egui::vec2(34.0, 0.0),
+                            egui::Align2::LEFT_CENTER,
+                            label,
+                            egui::FontId::proportional(13.5),
+                            text_color,
+                        );
+                    }
+                    if response.clicked() {
                         self.tab = *tab;
                     }
                     ui.add_space(3.0);
@@ -178,7 +195,11 @@ impl eframe::App for SettingsApp {
 
 impl SettingsApp {
     fn heading(&self, ui: &mut egui::Ui, title: &str, subtitle: &str) {
-        ui.label(egui::RichText::new(title).size(21.0).strong().color(design::TEXT));
+        ui.label(
+            egui::RichText::new(title)
+                .font(design::heading_font(24.0))
+                .color(design::TEXT),
+        );
         ui.add_space(2.0);
         ui.label(egui::RichText::new(subtitle).size(12.5).color(design::NEUTRAL_600));
         ui.add_space(20.0);
@@ -191,7 +212,7 @@ impl SettingsApp {
         // is what was blowing up the switches and the gap between rows.
         // Right-aligning by padding with a fixed-size spacer keeps the row's
         // height determined only by its actual content.
-        const TOGGLE_W: f32 = 36.0;
+        const TOGGLE_W: f32 = 34.0;
         let mut clicked = false;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -225,6 +246,26 @@ impl SettingsApp {
         ) {
             self.cfg.show_timer = !self.cfg.show_timer;
             self.save_cfg();
+        }
+        if self.cfg.show_timer {
+            ui.horizontal(|ui| {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new("Opacity:").size(12.0).color(design::NEUTRAL_600));
+                if ui
+                    .add(
+                        egui::Slider::new(&mut self.cfg.corner_timer_opacity, 0.1..=1.0)
+                            .show_value(false),
+                    )
+                    .changed()
+                {
+                    self.save_cfg();
+                }
+                ui.label(
+                    egui::RichText::new(format!("{}%", (self.cfg.corner_timer_opacity * 100.0).round() as i32))
+                        .size(12.0)
+                        .color(design::NEUTRAL_600),
+                );
+            });
         }
 
         ui.add_space(16.0);
@@ -299,7 +340,7 @@ impl SettingsApp {
     }
 
     fn theme_tab(&mut self, ui: &mut egui::Ui) {
-        self.heading(ui, "Theme", "Visual theme applied to the break overlay and corner timer.");
+        self.heading(ui, "Theme", "Visual theme applied to the break overlay.");
 
         egui::Grid::new("theme-grid").spacing([14.0, 14.0]).show(ui, |ui| {
             for (i, &t) in Theme::all().iter().enumerate() {
@@ -532,7 +573,11 @@ impl SettingsApp {
         // the tab's full remaining height, so we allocate a fixed-size
         // right-hand region for the segmented control instead.
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Usage stats").size(21.0).strong().color(design::TEXT));
+            ui.label(
+                egui::RichText::new("Usage stats")
+                    .font(design::heading_font(24.0))
+                    .color(design::TEXT),
+            );
             ui.allocate_ui_with_layout(
                 egui::vec2(160.0, 24.0),
                 egui::Layout::right_to_left(egui::Align::Center),
@@ -561,8 +606,7 @@ impl SettingsApp {
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new(format!("{}h {}m", today / 3600, (today % 3600) / 60))
-                    .size(30.0)
-                    .strong()
+                    .font(design::heading_font(30.0))
                     .color(design::TEXT),
             );
             ui.label(egui::RichText::new("today so far").size(12.0).color(design::NEUTRAL_600));

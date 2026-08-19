@@ -19,6 +19,10 @@ pub struct Config {
     /// Whether to show the always-on corner countdown to the next break.
     #[serde(default = "default_true")]
     pub show_timer: bool,
+    /// Opacity of the corner countdown card, 0.1 (near-invisible) to 1.0
+    /// (fully opaque). Lets it sit unobtrusively over whatever's beneath it.
+    #[serde(default = "default_corner_timer_opacity")]
+    pub corner_timer_opacity: f32,
     /// Visual theme for the overlay and corner timer windows.
     #[serde(default)]
     pub theme: Theme,
@@ -104,6 +108,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_corner_timer_opacity() -> f32 {
+    1.0
+}
+
 fn default_pomodoro_work_mins() -> u32 {
     25
 }
@@ -141,6 +149,7 @@ impl Default for Config {
             next_exercise: 0,
             snooze_secs: default_snooze_secs(),
             show_timer: default_true(),
+            corner_timer_opacity: default_corner_timer_opacity(),
             theme: Theme::default(),
             sound: sounds::SoundChoice::default(),
             pomodoro_enabled: false,
