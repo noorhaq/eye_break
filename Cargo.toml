@@ -38,6 +38,7 @@ directories = "5"
 gtk = "0.18"
 glib = "0.20"
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+libc = "0.2"
 
 [profile.release]
 opt-level = 2

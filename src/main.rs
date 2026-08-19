@@ -9,6 +9,7 @@ mod overlay;
 mod pomodoro;
 mod raise;
 mod settings;
+mod singleton;
 mod sounds;
 mod state;
 mod stats;
@@ -39,11 +40,26 @@ fn main() {
             );
         }
         Some("--timer") => {
-            // Internal mode: the persistent corner countdown window.
+            // Internal mode: the persistent corner countdown window. Guarded
+            // even though tray.rs's sync_timer_process already kills any
+            // prior child before spawning a new one — this is a belt-and-
+            // suspenders backstop against a race or a manual second launch.
+            let Some(_lock) = singleton::try_acquire("timer") else {
+                return;
+            };
             let _ = timer::run_timer();
         }
         Some("--settings") => {
-            // The full settings window, spawned by the tray's "Settings…" item.
+            // The full settings window, spawned by the tray's "Settings…"
+            // item. If one's already open, raise it instead of opening a
+            // second — clicking the menu item twice shouldn't spawn duplicate
+            // windows.
+            let Some(_lock) = singleton::try_acquire("settings") else {
+                let _ = std::process::Command::new("wmctrl")
+                    .args(["-a", "Eye Break — Settings"])
+                    .status();
+                return;
+            };
             let _ = settings::run_settings();
         }
         Some("enable") => {
@@ -112,6 +128,16 @@ fn main() {
             print_help();
         }
         None => {
+            // The default (no-args) launch is the tray icon + scheduler —
+            // exactly one of these should ever run at a time, since two
+            // would mean two tray icons, two schedulers racing to trigger
+            // breaks, and two writers to the same state/config files.
+            // Autostart + a manual launch (or double-clicking the app icon
+            // twice) is the common way this would otherwise happen.
+            let Some(_lock) = singleton::try_acquire("tray") else {
+                eprintln!("eye-break: already running — not starting a second instance.");
+                return;
+            };
             tray::run();
         }
         Some(other) => {
