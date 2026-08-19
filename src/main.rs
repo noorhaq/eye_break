@@ -6,6 +6,7 @@ mod pomodoro;
 mod raise;
 mod sounds;
 mod state;
+mod stats;
 mod theme;
 mod timer;
 mod tray;
