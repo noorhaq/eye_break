@@ -58,6 +58,14 @@ pub struct Config {
     /// (`workday_days[0]` = Monday, ..., `workday_days[6]` = Sunday).
     #[serde(default = "default_workday_days")]
     pub workday_days: [bool; 7],
+
+    /// The headline shown at the top of the break overlay.
+    #[serde(default = "default_reminder_text")]
+    pub reminder_text: String,
+}
+
+fn default_reminder_text() -> String {
+    "Time for an eye break!".to_string()
 }
 
 fn default_display_secs() -> u64 {
@@ -120,6 +128,7 @@ impl Default for Config {
             workday_start_hour: default_workday_start_hour(),
             workday_end_hour: default_workday_end_hour(),
             workday_days: default_workday_days(),
+            reminder_text: default_reminder_text(),
         }
     }
 }
