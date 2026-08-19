@@ -1,3 +1,4 @@
+mod autostart;
 mod config;
 mod exercises;
 mod monitors;
@@ -6,6 +7,7 @@ mod raise;
 mod state;
 mod timer;
 mod tray;
+mod updater;
 
 use config::Config;
 

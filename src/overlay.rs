@@ -38,6 +38,7 @@ struct OverlayApp {
     start: Instant,
     display_secs: f32,
     exercise: &'static Exercise,
+    reminder_text: String,
     my_dismiss_token: u64,
     last_state_poll: Instant,
 }
@@ -49,6 +50,7 @@ impl OverlayApp {
             start: Instant::now(),
             display_secs,
             exercise: exercises::get(exercise_index),
+            reminder_text: Config::load().reminder_text,
             my_dismiss_token,
             last_state_poll: Instant::now(),
         }
@@ -116,6 +118,14 @@ impl eframe::App for OverlayApp {
                 let center = screen.center();
                 let line_count = self.exercise.lines.len() as f32;
                 let body_top = center.y - 10.0 - (line_count - 1.0) * 14.0;
+
+                ui.painter().text(
+                    egui::pos2(center.x, center.y - 140.0),
+                    egui::Align2::CENTER_CENTER,
+                    &self.reminder_text,
+                    egui::FontId::proportional(28.0),
+                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, (230.0 * alpha) as u8),
+                );
 
                 ui.painter().text(
                     egui::pos2(center.x, center.y - 90.0),

@@ -17,6 +17,13 @@ pub struct Config {
     /// Whether to show the always-on corner countdown to the next break.
     #[serde(default = "default_true")]
     pub show_timer: bool,
+    /// The headline shown at the top of the break overlay.
+    #[serde(default = "default_reminder_text")]
+    pub reminder_text: String,
+}
+
+fn default_reminder_text() -> String {
+    "Time for an eye break!".to_string()
 }
 
 fn default_display_secs() -> u64 {
@@ -40,6 +47,7 @@ impl Default for Config {
             next_exercise: 0,
             snooze_secs: default_snooze_secs(),
             show_timer: default_true(),
+            reminder_text: default_reminder_text(),
         }
     }
 }
