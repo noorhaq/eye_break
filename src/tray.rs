@@ -230,6 +230,7 @@ pub fn run() {
 /// child manages its own lifetime and exits on its own, so this is
 /// fire-and-forget.
 fn trigger_break(cfg: &mut Config) {
+    crate::sounds::play(&cfg.sound);
     let monitors = list_monitors();
     let exe = std::env::current_exe().unwrap_or_else(|_| "eye-break".into());
     let exercise_index = cfg.next_exercise;

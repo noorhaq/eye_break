@@ -1,3 +1,4 @@
+use crate::sounds;
 use crate::theme::Theme;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -21,6 +22,9 @@ pub struct Config {
     /// Visual theme for the overlay and corner timer windows.
     #[serde(default)]
     pub theme: Theme,
+    /// Notification sound to play when a break overlay is triggered.
+    #[serde(default)]
+    pub sound: sounds::SoundChoice,
 }
 
 fn default_display_secs() -> u64 {
@@ -45,6 +49,7 @@ impl Default for Config {
             snooze_secs: default_snooze_secs(),
             show_timer: default_true(),
             theme: Theme::default(),
+            sound: sounds::SoundChoice::default(),
         }
     }
 }
