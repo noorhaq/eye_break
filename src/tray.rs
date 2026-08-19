@@ -58,6 +58,7 @@ fn sync_timer_process(exe: &std::path::Path, cfg: &Config, handle: &Rc<RefCell<O
 }
 
 pub fn run() {
+    #[cfg(target_os = "linux")]
     gtk::init().expect("failed to init GTK (needed for the tray icon)");
 
     let config = Rc::new(RefCell::new(Config::load()));
@@ -147,7 +148,11 @@ pub fn run() {
     let exe_tick = exe.clone();
     let timer_child_tick = timer_child.clone();
 
-    glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+    // One tick of the event/scheduler loop, shared across platforms — Linux
+    // drives it via glib::timeout_add_local under gtk::main(), Windows drives
+    // it via a WM_TIMER pumped from a manual message loop (see below).
+    // Returns false when the app should quit.
+    let tick = move || -> bool {
         // Handle menu events.
         while let Ok(event) = menu_channel.try_recv() {
             if event.id == toggle_id {
@@ -179,7 +184,7 @@ pub fn run() {
                 if let Some(mut child) = timer_child_tick.borrow_mut().take() {
                     let _ = child.kill();
                 }
-                gtk::main_quit();
+                return false;
             } else if let Some((_, secs)) = interval_ids.iter().find(|(id, _)| *id == event.id) {
                 let mut cfg = config.borrow_mut();
                 cfg.interval_secs = *secs;
@@ -218,11 +223,58 @@ pub fn run() {
             trigger_break(&mut cfg);
         }
 
-        glib::ControlFlow::Continue
-    });
+        true
+    };
 
     println!("[eye-break] running. Right-click the tray icon for settings.");
-    gtk::main();
+
+    #[cfg(target_os = "linux")]
+    {
+        glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+            if tick() {
+                glib::ControlFlow::Continue
+            } else {
+                gtk::main_quit();
+                glib::ControlFlow::Break
+            }
+        });
+        gtk::main();
+    }
+
+    #[cfg(windows)]
+    {
+        run_windows_message_loop(tick);
+    }
+}
+
+/// Manual Win32 message loop: pumps window/menu messages (tray-icon and muda
+/// need this to deliver menu clicks on Windows) and fires `tick` every 500ms
+/// off a `SetTimer`, until `tick` returns false or a WM_QUIT is posted.
+#[cfg(windows)]
+fn run_windows_message_loop(mut tick: impl FnMut() -> bool) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, GetMessageW, SetTimer, TranslateMessage, MSG, WM_TIMER,
+    };
+
+    const TICK_TIMER_ID: usize = 1;
+    unsafe {
+        SetTimer(std::ptr::null_mut(), TICK_TIMER_ID, 500, None);
+
+        let mut msg: MSG = std::mem::zeroed();
+        loop {
+            let ret = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);
+            if ret <= 0 {
+                break; // WM_QUIT or error
+            }
+            if msg.message == WM_TIMER && msg.wParam == TICK_TIMER_ID {
+                if !tick() {
+                    break;
+                }
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
 }
 
 /// Spawn one overlay child process per monitor, all showing the same

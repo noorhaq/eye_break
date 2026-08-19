@@ -1,6 +1,7 @@
-/// Query monitor geometries via `xrandr`. Works on X11 (this system's session type).
-/// Falls back to a single 1920x1080 "monitor" at origin if xrandr is unavailable
-/// or nothing could be parsed, so the app still functions.
+/// Query monitor geometries. On Linux (X11) this shells out to `xrandr`; on
+/// Windows it uses `EnumDisplayMonitors`. Falls back to a single 1920x1080
+/// "monitor" at origin if nothing could be queried/parsed, so the app still
+/// functions.
 #[derive(Debug, Clone, Copy)]
 pub struct MonitorRect {
     pub x: i32,
@@ -10,6 +11,17 @@ pub struct MonitorRect {
     pub primary: bool,
 }
 
+/// The monitor to anchor single-instance UI (like the corner countdown) to.
+pub fn primary_monitor() -> MonitorRect {
+    let monitors = list_monitors();
+    monitors
+        .iter()
+        .find(|m| m.primary)
+        .copied()
+        .unwrap_or(monitors[0])
+}
+
+#[cfg(target_os = "linux")]
 pub fn list_monitors() -> Vec<MonitorRect> {
     let output = std::process::Command::new("xrandr")
         .arg("--query")
@@ -46,16 +58,7 @@ pub fn list_monitors() -> Vec<MonitorRect> {
     monitors
 }
 
-/// The monitor to anchor single-instance UI (like the corner countdown) to.
-pub fn primary_monitor() -> MonitorRect {
-    let monitors = list_monitors();
-    monitors
-        .iter()
-        .find(|m| m.primary)
-        .copied()
-        .unwrap_or(monitors[0])
-}
-
+#[cfg(target_os = "linux")]
 fn parse_geometry(token: &str) -> Option<MonitorRect> {
     // Format: WxH+X+Y  (possibly with trailing stuff we ignore)
     let (wh, rest) = token.split_once('+')?;
@@ -68,4 +71,52 @@ fn parse_geometry(token: &str) -> Option<MonitorRect> {
     let y: i32 = y_str.parse().ok()?;
 
     Some(MonitorRect { x, y, w, h, primary: false })
+}
+
+#[cfg(windows)]
+pub fn list_monitors() -> Vec<MonitorRect> {
+    use std::cell::RefCell;
+    use windows_sys::Win32::Foundation::{BOOL, LPARAM, RECT};
+    use windows_sys::Win32::Graphics::Gdi::{
+        EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOF_PRIMARY,
+    };
+
+    thread_local! {
+        static FOUND: RefCell<Vec<MonitorRect>> = RefCell::new(Vec::new());
+    }
+    FOUND.with(|f| f.borrow_mut().clear());
+
+    unsafe extern "system" fn callback(
+        hmonitor: HMONITOR,
+        _hdc: HDC,
+        _rect: *mut RECT,
+        _lparam: LPARAM,
+    ) -> BOOL {
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(hmonitor, &mut info) != 0 {
+            let r = info.rcMonitor;
+            let rect = MonitorRect {
+                x: r.left,
+                y: r.top,
+                w: (r.right - r.left) as u32,
+                h: (r.bottom - r.top) as u32,
+                primary: (info.dwFlags & MONITORINFOF_PRIMARY) != 0,
+            };
+            FOUND.with(|f| f.borrow_mut().push(rect));
+        }
+        1 // continue enumeration
+    }
+
+    unsafe {
+        EnumDisplayMonitors(std::ptr::null_mut(), std::ptr::null(), Some(callback), 0);
+    }
+
+    let mut monitors = FOUND.with(|f| f.borrow().clone());
+    if monitors.is_empty() {
+        monitors.push(MonitorRect { x: 0, y: 0, w: 1920, h: 1080, primary: true });
+    } else if !monitors.iter().any(|m| m.primary) {
+        monitors[0].primary = true;
+    }
+    monitors
 }
