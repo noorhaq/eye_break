@@ -4,6 +4,7 @@ mod monitors;
 mod overlay;
 mod raise;
 mod state;
+mod stats;
 mod timer;
 mod tray;
 

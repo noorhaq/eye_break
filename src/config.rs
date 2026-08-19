@@ -17,6 +17,21 @@ pub struct Config {
     /// Whether to show the always-on corner countdown to the next break.
     #[serde(default = "default_true")]
     pub show_timer: bool,
+    /// Whether breaks are restricted to a configured workday schedule.
+    /// When false (the default), reminders fire all day, matching the
+    /// original behavior.
+    #[serde(default)]
+    pub workday_enabled: bool,
+    /// Hour (0-23, local time) the workday schedule starts at.
+    #[serde(default = "default_workday_start_hour")]
+    pub workday_start_hour: u8,
+    /// Hour (0-23, local time) the workday schedule ends at.
+    #[serde(default = "default_workday_end_hour")]
+    pub workday_end_hour: u8,
+    /// Which weekdays the workday schedule applies to, Monday first
+    /// (`workday_days[0]` = Monday, ..., `workday_days[6]` = Sunday).
+    #[serde(default = "default_workday_days")]
+    pub workday_days: [bool; 7],
 }
 
 fn default_display_secs() -> u64 {
@@ -31,6 +46,18 @@ fn default_true() -> bool {
     true
 }
 
+fn default_workday_start_hour() -> u8 {
+    9
+}
+
+fn default_workday_end_hour() -> u8 {
+    17
+}
+
+fn default_workday_days() -> [bool; 7] {
+    [true; 7]
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -40,6 +67,10 @@ impl Default for Config {
             next_exercise: 0,
             snooze_secs: default_snooze_secs(),
             show_timer: default_true(),
+            workday_enabled: false,
+            workday_start_hour: default_workday_start_hour(),
+            workday_end_hour: default_workday_end_hour(),
+            workday_days: default_workday_days(),
         }
     }
 }
@@ -71,4 +102,39 @@ impl Config {
             let _ = std::fs::write(path, s);
         }
     }
+}
+
+/// Returns whether the current moment falls inside the configured workday
+/// schedule (`workday_start_hour`..`workday_end_hour`, on a
+/// `workday_days`-enabled weekday). Always returns `true` when
+/// `workday_enabled` is false, matching the original always-on behavior.
+///
+/// Intended for the tray/scheduler integration step to call before
+/// triggering a break.
+///
+/// Note: time-of-day and weekday are computed from UTC (no timezone crate
+/// dependency), so on machines far from UTC this may not line up with local
+/// wall-clock hours. Good enough as a first pass; revisit if precise local
+/// time is needed.
+#[allow(dead_code)]
+pub fn is_within_workday(cfg: &Config) -> bool {
+    if !cfg.workday_enabled {
+        return true;
+    }
+    let epoch_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let days_since_epoch = (epoch_secs / 86_400) as i64;
+    let secs_of_day = epoch_secs % 86_400;
+    let hour = (secs_of_day / 3600) as u8;
+
+    // 1970-01-01 was a Thursday (weekday index 3 if Monday = 0).
+    let weekday = (((days_since_epoch % 7) + 7 + 3) % 7) as usize; // 0 = Monday .. 6 = Sunday
+
+    if !cfg.workday_days[weekday] {
+        return false;
+    }
+    hour >= cfg.workday_start_hour && hour < cfg.workday_end_hour
 }
