@@ -10,13 +10,28 @@
 use std::io;
 use std::path::PathBuf;
 
+#[cfg(target_os = "linux")]
 fn autostart_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     Some(PathBuf::from(home).join(".config").join("autostart"))
 }
 
+#[cfg(target_os = "linux")]
 fn autostart_file() -> Option<PathBuf> {
     Some(autostart_dir()?.join("eye-break.desktop"))
+}
+
+/// macOS uses a per-user LaunchAgent plist instead of a freedesktop
+/// autostart `.desktop` entry.
+#[cfg(target_os = "macos")]
+fn autostart_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join("Library").join("LaunchAgents"))
+}
+
+#[cfg(target_os = "macos")]
+fn autostart_file() -> Option<PathBuf> {
+    Some(autostart_dir()?.join("dev.eye-break.eye-break.plist"))
 }
 
 /// Whether a user-level autostart entry currently exists.
@@ -46,7 +61,14 @@ pub fn set_enabled(enabled: bool) -> io::Result<()> {
     let exe = std::env::current_exe()?;
     let exec = exe.to_string_lossy().to_string();
 
-    let contents = format!(
+    let contents = autostart_file_contents(&exec);
+
+    std::fs::write(&path, contents)
+}
+
+#[cfg(target_os = "linux")]
+fn autostart_file_contents(exec: &str) -> String {
+    format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name=Eye Break\n\
@@ -57,7 +79,25 @@ pub fn set_enabled(enabled: bool) -> io::Result<()> {
          Categories=Utility;Health;\n\
          StartupNotify=false\n\
          X-GNOME-Autostart-enabled=true\n"
-    );
+    )
+}
 
-    std::fs::write(&path, contents)
+#[cfg(target_os = "macos")]
+fn autostart_file_contents(exec: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+         <plist version=\"1.0\">\n\
+         <dict>\n\
+         \x20   <key>Label</key>\n\
+         \x20   <string>dev.eye-break.eye-break</string>\n\
+         \x20   <key>ProgramArguments</key>\n\
+         \x20   <array><string>{exec}</string></array>\n\
+         \x20   <key>RunAtLoad</key>\n\
+         \x20   <true/>\n\
+         \x20   <key>ProcessType</key>\n\
+         \x20   <string>Interactive</string>\n\
+         </dict>\n\
+         </plist>\n"
+    )
 }

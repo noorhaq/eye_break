@@ -61,9 +61,51 @@ fn sync_timer_process(exe: &std::path::Path, cfg: &Config, handle: &Rc<RefCell<O
     }
 }
 
+#[cfg(target_os = "linux")]
 pub fn run() {
     gtk::init().expect("failed to init GTK (needed for the tray icon)");
+    let should_quit = Rc::new(RefCell::new(false));
+    let mut tick = build_tick(should_quit.clone());
+    glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+        tick();
+        if *should_quit.borrow() {
+            gtk::main_quit();
+        }
+        glib::ControlFlow::Continue
+    });
+    println!("[eye-break] running. Right-click the tray icon for settings.");
+    gtk::main();
+}
 
+/// macOS (and any other non-Linux target): `tray-icon` there just needs an
+/// NSApplication-style run loop pumped periodically, not a GTK main loop —
+/// `tao`'s `EventLoop` gives us that without pulling in GTK/X11 at all.
+#[cfg(not(target_os = "linux"))]
+pub fn run() {
+    use tao::event_loop::{ControlFlow, EventLoopBuilder};
+
+    let should_quit = Rc::new(RefCell::new(false));
+    let mut tick = build_tick(should_quit.clone());
+
+    println!("[eye-break] running. Click the tray icon for settings.");
+    let event_loop = EventLoopBuilder::new().build();
+    event_loop.run(move |_event, _target, control_flow| {
+        *control_flow = ControlFlow::WaitUntil(
+            std::time::Instant::now() + std::time::Duration::from_millis(500),
+        );
+        tick();
+        if *should_quit.borrow() {
+            *control_flow = ControlFlow::Exit;
+        }
+    });
+}
+
+/// Builds the tray menu/icon and returns the recurring scheduler-tick
+/// closure, shared verbatim between the GTK (Linux) and `tao` (everywhere
+/// else) event-loop drivers above. Setting `*should_quit.borrow_mut() = true`
+/// from within the closure (on the "Quit" menu item) is how it asks its
+/// caller's loop to stop, since each platform's loop is stopped differently.
+fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
     let config = Rc::new(RefCell::new(Config::load()));
     let exe = std::env::current_exe().unwrap_or_else(|_| "eye-break".into());
 
@@ -167,7 +209,12 @@ pub fn run() {
     let mut cached_is_fullscreen = false;
     let mut was_idle = false;
 
-    glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+    move || {
+        // Keep the tray icon alive for as long as this closure (and thus the
+        // whole scheduler loop) lives — it would otherwise be dropped, and
+        // the icon vanish, the instant `build_tick` returns.
+        let _tray = &_tray;
+
         // Handle menu events.
         while let Ok(event) = menu_channel.try_recv() {
             if event.id == toggle_id {
@@ -201,7 +248,7 @@ pub fn run() {
                 if let Some(mut child) = timer_child_tick.borrow_mut().take() {
                     let _ = child.kill();
                 }
-                gtk::main_quit();
+                *should_quit.borrow_mut() = true;
             } else if let Some((_, secs)) = interval_ids.iter().find(|(id, _)| *id == event.id) {
                 let mut cfg = config.borrow_mut();
                 cfg.interval_secs = *secs;
@@ -294,12 +341,7 @@ pub fn run() {
             let mut cfg = config.borrow_mut();
             trigger_break(&mut cfg);
         }
-
-        glib::ControlFlow::Continue
-    });
-
-    println!("[eye-break] running. Right-click the tray icon for settings.");
-    gtk::main();
+    }
 }
 
 /// Spawn one overlay child process per monitor, all showing the same
