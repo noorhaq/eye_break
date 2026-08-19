@@ -1,6 +1,7 @@
 mod activewindow;
 mod autostart;
 mod config;
+mod design;
 mod exercises;
 mod idle;
 mod monitors;

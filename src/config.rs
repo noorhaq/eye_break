@@ -51,9 +51,15 @@ pub struct Config {
     /// Hour (0-23, local time) the workday schedule starts at.
     #[serde(default = "default_workday_start_hour")]
     pub workday_start_hour: u8,
+    /// Minute (0-59) within `workday_start_hour` the schedule starts at.
+    #[serde(default)]
+    pub workday_start_minute: u8,
     /// Hour (0-23, local time) the workday schedule ends at.
     #[serde(default = "default_workday_end_hour")]
     pub workday_end_hour: u8,
+    /// Minute (0-59) within `workday_end_hour` the schedule ends at.
+    #[serde(default)]
+    pub workday_end_minute: u8,
     /// Which weekdays the workday schedule applies to, Monday first
     /// (`workday_days[0]` = Monday, ..., `workday_days[6]` = Sunday).
     #[serde(default = "default_workday_days")]
@@ -144,7 +150,9 @@ impl Default for Config {
             pomodoro_cycles_before_long_break: default_pomodoro_cycles_before_long_break(),
             workday_enabled: false,
             workday_start_hour: default_workday_start_hour(),
+            workday_start_minute: 0,
             workday_end_hour: default_workday_end_hour(),
+            workday_end_minute: 0,
             workday_days: default_workday_days(),
             reminder_text: default_reminder_text(),
             fullscreen_pause_enabled: default_true(),
@@ -207,7 +215,7 @@ pub fn is_within_workday(cfg: &Config) -> bool {
 
     let days_since_epoch = (epoch_secs / 86_400) as i64;
     let secs_of_day = epoch_secs % 86_400;
-    let hour = (secs_of_day / 3600) as u8;
+    let minute_of_day = (secs_of_day / 60) as u32;
 
     // 1970-01-01 was a Thursday (weekday index 3 if Monday = 0).
     let weekday = (((days_since_epoch % 7) + 7 + 3) % 7) as usize; // 0 = Monday .. 6 = Sunday
@@ -215,5 +223,7 @@ pub fn is_within_workday(cfg: &Config) -> bool {
     if !cfg.workday_days[weekday] {
         return false;
     }
-    hour >= cfg.workday_start_hour && hour < cfg.workday_end_hour
+    let start = cfg.workday_start_hour as u32 * 60 + cfg.workday_start_minute as u32;
+    let end = cfg.workday_end_hour as u32 * 60 + cfg.workday_end_minute as u32;
+    minute_of_day >= start && minute_of_day < end
 }

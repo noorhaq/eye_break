@@ -69,8 +69,10 @@ pub fn apply(ctx: &egui::Context, theme: Theme) {
     ctx.set_style(style);
 }
 
-/// (window background, panel background, accent, text) for a theme.
-fn palette(theme: Theme) -> (egui::Color32, egui::Color32, egui::Color32, egui::Color32) {
+/// (window background, panel background, accent, text) for a theme — public
+/// so UI (e.g. the theme-picker swatch cards in Settings) can preview a
+/// theme's palette without applying it.
+pub fn palette(theme: Theme) -> (egui::Color32, egui::Color32, egui::Color32, egui::Color32) {
     match theme {
         Theme::Dark => (
             egui::Color32::from_rgb(24, 24, 27),

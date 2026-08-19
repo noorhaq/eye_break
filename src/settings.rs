@@ -1,21 +1,28 @@
-//! The full configuration UI: a single egui window exposing every setting
-//! added across the theme/sounds/pomodoro/stats/reminder-text features,
-//! plus run-on-startup and manual update checks. Launched as its own
-//! process (`eye-break --settings`) so it doesn't have to share an event
-//! loop with the GTK-driven tray icon, same as timer.rs's corner countdown.
+//! The full configuration UI. Visual chrome ported from the "Classical"
+//! design at claude.ai/design (`Eye Break Settings.dc.html`): a left-side
+//! nav with six sections, warm/editorial palette, and painted gauges
+//! (interval dial, workday clock face, 24h activity wheel) instead of plain
+//! form controls where the design calls for them. See `design.rs` for the
+//! shared tokens/widgets and `theme.rs` for the (separate, user-facing)
+//! overlay/timer theme this window lets you pick.
+//!
+//! Launched as its own process (`eye-break --settings`), same as
+//! `timer.rs`'s corner countdown, so it doesn't have to share an event loop
+//! with the GTK-driven tray icon.
 
 use crate::config::Config;
+use crate::design;
 use crate::sounds::SoundChoice;
-use crate::stats::{today_usage_secs, usage_last_n_days, DailyUsage, UsageLog};
-use crate::theme::{self, Theme};
+use crate::stats::{hourly_activity_fractions, today_usage_secs, usage_last_n_days, UsageLog};
+use crate::theme::Theme;
 use crate::{autostart, updater};
 use eframe::egui;
 use std::sync::{Arc, Mutex};
 
 pub fn run_settings() -> eframe::Result<()> {
     let viewport = egui::ViewportBuilder::default()
-        .with_inner_size(egui::vec2(480.0, 640.0))
-        .with_min_inner_size(egui::vec2(420.0, 480.0))
+        .with_inner_size(egui::vec2(860.0, 620.0))
+        .with_min_inner_size(egui::vec2(680.0, 480.0))
         .with_title("Eye Break — Settings");
 
     let options = eframe::NativeOptions {
@@ -30,10 +37,33 @@ pub fn run_settings() -> eframe::Result<()> {
     )
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Tab {
+    General,
+    Theme,
+    Sound,
+    Pomodoro,
+    Schedule,
+    Stats,
+}
+
+const TABS: &[(Tab, &str, &str)] = &[
+    (Tab::General, "⚙", "General"),
+    (Tab::Theme, "🎨", "Theme"),
+    (Tab::Sound, "🔔", "Sound"),
+    (Tab::Pomodoro, "🍅", "Pomodoro"),
+    (Tab::Schedule, "🗓", "Schedule"),
+    (Tab::Stats, "📊", "Stats"),
+];
+
+const INTERVAL_PRESETS_MIN: &[u64] = &[10, 15, 20, 30, 45, 60, 90, 120];
+
 struct SettingsApp {
     cfg: Config,
     usage: UsageLog,
     autostart_enabled: bool,
+    tab: Tab,
+    stats_period_days: usize,
     /// Shared with the background thread spawned by "Check for updates" so
     /// the (potentially several-second) network call never blocks the UI
     /// thread. `Some("Checking…")` while in flight, replaced with the result
@@ -47,6 +77,8 @@ impl SettingsApp {
             cfg: Config::load(),
             usage: UsageLog::load(),
             autostart_enabled: autostart::is_enabled(),
+            tab: Tab::General,
+            stats_period_days: 7,
             update_status: Arc::new(Mutex::new(None)),
         }
     }
@@ -58,330 +90,506 @@ impl SettingsApp {
 
 impl eframe::App for SettingsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        theme::apply(ctx, self.cfg.theme);
+        design::apply(ctx);
 
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none().inner_margin(egui::Margin::symmetric(20.0, 16.0)))
+        egui::SidePanel::left("nav")
+            .exact_width(210.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::none()
+                    .fill(design::SURFACE)
+                    .inner_margin(egui::Margin::symmetric(14.0, 22.0))
+                    .stroke(egui::Stroke::NONE),
+            )
             .show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("👁").size(28.0));
-                    ui.add_space(6.0);
+                    ui.label(egui::RichText::new("👁").size(20.0).color(design::ACCENT_700));
+                    ui.add_space(4.0);
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new("Eye Break")
+                                .size(16.0)
+                                .strong()
+                                .color(design::TEXT),
+                        );
+                        ui.label(
+                            egui::RichText::new("20-20-20 reminders")
+                                .size(10.5)
+                                .color(design::NEUTRAL_600),
+                        );
+                    });
+                });
+                ui.add_space(10.0);
+                ui.painter().hline(
+                    ui.min_rect().x_range(),
+                    ui.min_rect().bottom(),
+                    egui::Stroke::new(1.0_f32, design::DIVIDER),
+                );
+                ui.add_space(10.0);
+
+                for (tab, icon, label) in TABS {
+                    let active = self.tab == *tab;
+                    let (fill, text_color) = if active {
+                        (design::ACCENT_100, design::ACCENT_700)
+                    } else {
+                        (egui::Color32::TRANSPARENT, design::TEXT)
+                    };
+                    let text = egui::RichText::new(format!("{icon}  {label}"))
+                        .size(13.5)
+                        .color(text_color);
+                    let button = egui::Button::new(text)
+                        .fill(fill)
+                        .stroke(egui::Stroke::NONE)
+                        .rounding(design::RADIUS_MD)
+                        .min_size(egui::vec2(ui.available_width(), 0.0));
+                    if ui.add(button).clicked() {
+                        self.tab = *tab;
+                    }
+                    ui.add_space(3.0);
+                }
+
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.label(
-                        egui::RichText::new("Eye Break")
-                            .size(24.0)
-                            .strong(),
+                        egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                            .size(11.0)
+                            .color(design::NEUTRAL_600),
                     );
                 });
-                ui.label(
-                    egui::RichText::new("Settings")
-                        .size(13.0)
-                        .color(ui.visuals().weak_text_color()),
-                );
-                ui.add_space(12.0);
+            });
 
-                egui::CollapsingHeader::new("⚙  General").default_open(true).show(ui, |ui| {
-                    let mut changed = false;
-                    changed |= ui.checkbox(&mut self.cfg.enabled, "Enabled").changed();
-                    changed |= ui
-                        .checkbox(&mut self.cfg.show_timer, "Show corner countdown")
-                        .changed();
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::none()
+                    .fill(design::BG)
+                    .inner_margin(egui::Margin::symmetric(36.0, 28.0)),
+            )
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
+                    Tab::General => self.general_tab(ui),
+                    Tab::Theme => self.theme_tab(ui),
+                    Tab::Sound => self.sound_tab(ui),
+                    Tab::Pomodoro => self.pomodoro_tab(ui),
+                    Tab::Schedule => self.schedule_tab(ui),
+                    Tab::Stats => self.stats_tab(ui),
+                });
+            });
+    }
+}
 
-                    ui.horizontal(|ui| {
-                        ui.label("Reminder interval (min):");
-                        let mut mins = self.cfg.interval_secs / 60;
-                        if ui.add(egui::DragValue::new(&mut mins).range(1..=240)).changed() {
-                            self.cfg.interval_secs = mins * 60;
-                            changed = true;
+impl SettingsApp {
+    fn heading(&self, ui: &mut egui::Ui, title: &str, subtitle: &str) {
+        ui.label(egui::RichText::new(title).size(21.0).strong().color(design::TEXT));
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new(subtitle).size(12.5).color(design::NEUTRAL_600));
+        ui.add_space(20.0);
+    }
+
+    fn toggle_row(&mut self, ui: &mut egui::Ui, label: &str, sublabel: &str, value: bool) -> bool {
+        let mut clicked = false;
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new(label).size(14.0).color(design::TEXT));
+                ui.label(egui::RichText::new(sublabel).size(12.0).color(design::NEUTRAL_600));
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if design::toggle_switch(ui, value).clicked() {
+                    clicked = true;
+                }
+            });
+        });
+        clicked
+    }
+
+    fn general_tab(&mut self, ui: &mut egui::Ui) {
+        self.heading(ui, "General", "Core reminder behavior — how often, how long, and what it says.");
+
+        if self.toggle_row(ui, "Enabled", "Turn reminders on or off entirely", self.cfg.enabled) {
+            self.cfg.enabled = !self.cfg.enabled;
+            self.save_cfg();
+        }
+        ui.add_space(14.0);
+        if self.toggle_row(
+            ui,
+            "Show corner countdown",
+            "A small always-on-top timer to the next break",
+            self.cfg.show_timer,
+        ) {
+            self.cfg.show_timer = !self.cfg.show_timer;
+            self.save_cfg();
+        }
+
+        ui.add_space(16.0);
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::DIVIDER));
+        ui.add_space(16.0);
+
+        ui.horizontal(|ui| {
+            let frac = (self.cfg.interval_secs as f32 / 60.0 / 60.0).min(1.0);
+            design::radial_gauge(ui, 120.0, frac, &(self.cfg.interval_secs / 60).to_string(), "minutes");
+            ui.add_space(28.0);
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("Reminder interval").size(14.0).color(design::TEXT));
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| {
+                    for &min in INTERVAL_PRESETS_MIN {
+                        let active = self.cfg.interval_secs == min * 60;
+                        if design::chip(ui, &format!("{min} min"), active).clicked() {
+                            self.cfg.interval_secs = min * 60;
+                            self.save_cfg();
                         }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Break duration (sec):");
-                        changed |= ui
-                            .add(egui::DragValue::new(&mut self.cfg.display_secs).range(1..=120))
-                            .changed();
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Snooze length (min):");
-                        let mut mins = self.cfg.snooze_secs / 60;
-                        if ui.add(egui::DragValue::new(&mut mins).range(1..=180)).changed() {
-                            self.cfg.snooze_secs = mins * 60;
-                            changed = true;
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Reminder text:");
-                        changed |= ui.text_edit_singleline(&mut self.cfg.reminder_text).changed();
-                    });
-
-                    if changed {
-                        self.save_cfg();
-                    }
-                });
-
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-                egui::CollapsingHeader::new("🎨  Theme").show(ui, |ui| {
-                    let mut changed = false;
-                    egui::ComboBox::from_label("Theme")
-                        .selected_text(self.cfg.theme.label())
-                        .show_ui(ui, |ui| {
-                            for &t in Theme::all() {
-                                if ui
-                                    .selectable_value(&mut self.cfg.theme, t, t.label())
-                                    .changed()
-                                {
-                                    changed = true;
-                                }
-                            }
-                        });
-                    if changed {
-                        self.save_cfg();
-                    }
-                });
-
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-                egui::CollapsingHeader::new("🔔  Sound").show(ui, |ui| {
-                    let mut changed = false;
-                    let current_label = match &self.cfg.sound {
-                        SoundChoice::None => "None",
-                        SoundChoice::Chime => "Chime",
-                        SoundChoice::Bell => "Bell",
-                        SoundChoice::Custom(_) => "Custom",
-                    };
-                    egui::ComboBox::from_label("Notification sound")
-                        .selected_text(current_label)
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_label(current_label == "None", "None")
-                                .clicked()
-                            {
-                                self.cfg.sound = SoundChoice::None;
-                                changed = true;
-                            }
-                            if ui
-                                .selectable_label(current_label == "Chime", "Chime")
-                                .clicked()
-                            {
-                                self.cfg.sound = SoundChoice::Chime;
-                                changed = true;
-                            }
-                            if ui
-                                .selectable_label(current_label == "Bell", "Bell")
-                                .clicked()
-                            {
-                                self.cfg.sound = SoundChoice::Bell;
-                                changed = true;
-                            }
-                        });
-
-                    if ui.button("Preview sound").clicked() {
-                        crate::sounds::play(&self.cfg.sound);
-                    }
-
-                    ui.horizontal(|ui| {
-                        ui.label("Custom sound path:");
-                        let mut path = match &self.cfg.sound {
-                            SoundChoice::Custom(p) => p.clone(),
-                            _ => String::new(),
-                        };
-                        if ui.text_edit_singleline(&mut path).changed() && !path.is_empty() {
-                            self.cfg.sound = SoundChoice::Custom(path);
-                            changed = true;
-                        }
-                    });
-
-                    if changed {
-                        self.save_cfg();
-                    }
-                });
-
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-                egui::CollapsingHeader::new("🍅  Pomodoro").show(ui, |ui| {
-                    let mut changed = false;
-                    changed |= ui
-                        .checkbox(&mut self.cfg.pomodoro_enabled, "Enable Pomodoro mode")
-                        .changed();
-                    ui.add_enabled_ui(self.cfg.pomodoro_enabled, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Work (min):");
-                            changed |= ui
-                                .add(
-                                    egui::DragValue::new(&mut self.cfg.pomodoro_work_mins)
-                                        .range(1..=120),
-                                )
-                                .changed();
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Short break (min):");
-                            changed |= ui
-                                .add(
-                                    egui::DragValue::new(&mut self.cfg.pomodoro_short_break_mins)
-                                        .range(1..=60),
-                                )
-                                .changed();
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Long break (min):");
-                            changed |= ui
-                                .add(
-                                    egui::DragValue::new(&mut self.cfg.pomodoro_long_break_mins)
-                                        .range(1..=120),
-                                )
-                                .changed();
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Cycles before long break:");
-                            changed |= ui
-                                .add(egui::DragValue::new(
-                                    &mut self.cfg.pomodoro_cycles_before_long_break,
-                                ))
-                                .changed();
-                        });
-                    });
-                    if changed {
-                        self.save_cfg();
-                    }
-                });
-
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-                egui::CollapsingHeader::new("🗓  Workday schedule").show(ui, |ui| {
-                    let mut changed = false;
-                    changed |= ui
-                        .checkbox(&mut self.cfg.workday_enabled, "Only remind during workday hours")
-                        .changed();
-                    ui.add_enabled_ui(self.cfg.workday_enabled, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Start hour (0-23):");
-                            changed |= ui
-                                .add(
-                                    egui::DragValue::new(&mut self.cfg.workday_start_hour)
-                                        .range(0..=23),
-                                )
-                                .changed();
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("End hour (0-23):");
-                            changed |= ui
-                                .add(
-                                    egui::DragValue::new(&mut self.cfg.workday_end_hour)
-                                        .range(0..=23),
-                                )
-                                .changed();
-                        });
-                        ui.horizontal(|ui| {
-                            let day_names =
-                                ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-                            for (i, name) in day_names.iter().enumerate() {
-                                changed |=
-                                    ui.checkbox(&mut self.cfg.workday_days[i], *name).changed();
-                            }
-                        });
-                    });
-                    if changed {
-                        self.save_cfg();
-                    }
-                });
-
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-                egui::CollapsingHeader::new("🧘  Smart pausing").show(ui, |ui| {
-                    let mut changed = false;
-                    changed |= ui
-                        .checkbox(
-                            &mut self.cfg.idle_pause_enabled,
-                            "Pause reminders while the system is idle",
-                        )
-                        .changed();
-                    ui.add_enabled_ui(self.cfg.idle_pause_enabled, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Idle after (min):");
-                            changed |= ui
-                                .add(
-                                    egui::DragValue::new(&mut self.cfg.idle_pause_after_mins)
-                                        .range(1..=60),
-                                )
-                                .changed();
-                        });
-                    });
-                    changed |= ui
-                        .checkbox(
-                            &mut self.cfg.fullscreen_pause_enabled,
-                            "Don't interrupt fullscreen apps (calls, presentations, video)",
-                        )
-                        .changed();
-                    if changed {
-                        self.save_cfg();
-                    }
-                });
-
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-                egui::CollapsingHeader::new("📊  Usage stats").default_open(true).show(ui, |ui| {
-                    let today = today_usage_secs(&self.usage);
-                    ui.label(format!(
-                        "Today's device usage: {}h {}m",
-                        today / 3600,
-                        (today % 3600) / 60
-                    ));
-                    ui.add_space(8.0);
-                    usage_bar_chart(ui, &usage_last_n_days(&self.usage, 7));
-                });
-
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-                egui::CollapsingHeader::new("🚀  Startup & updates").show(ui, |ui| {
-                    let mut enabled = self.autostart_enabled;
-                    if ui.checkbox(&mut enabled, "Run on startup").changed() {
-                        let _ = autostart::set_enabled(enabled);
-                        self.autostart_enabled = autostart::is_enabled();
-                    }
-                    if ui.button("Check for updates").clicked() {
-                        *self.update_status.lock().unwrap() = Some("Checking…".to_string());
-                        let status = self.update_status.clone();
-                        updater::check_for_update_async(env!("CARGO_PKG_VERSION"), move |result| {
-                            let text = match result {
-                                Some(v) => format!("Update available: {v}"),
-                                None => "You're up to date.".to_string(),
-                            };
-                            *status.lock().unwrap() = Some(text);
-                        });
-                    }
-                    if let Some(status) = self.update_status.lock().unwrap().as_ref() {
-                        ui.label(status);
                     }
                 });
             });
         });
 
-        // Usage stats/tick updates aren't relevant to this window's own
-        // lifetime — it's a settings dialog, not the long-running scheduler.
-        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        ui.add_space(20.0);
+        ui.columns(2, |cols| {
+            cols[0].label(egui::RichText::new("Break duration (sec)").size(12.0).color(design::NEUTRAL_600));
+            if cols[0].add(egui::DragValue::new(&mut self.cfg.display_secs).range(1..=120)).changed() {
+                self.save_cfg();
+            }
+            cols[1].label(egui::RichText::new("Snooze length (min)").size(12.0).color(design::NEUTRAL_600));
+            let mut snooze_min = self.cfg.snooze_secs / 60;
+            if cols[1].add(egui::DragValue::new(&mut snooze_min).range(1..=180)).changed() {
+                self.cfg.snooze_secs = snooze_min * 60;
+                self.save_cfg();
+            }
+        });
+
+        ui.add_space(16.0);
+        ui.label(egui::RichText::new("Reminder text").size(12.0).color(design::NEUTRAL_600));
+        if ui.text_edit_singleline(&mut self.cfg.reminder_text).changed() {
+            self.save_cfg();
+        }
+
+        ui.add_space(24.0);
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::DIVIDER));
+        ui.add_space(16.0);
+        ui.label(egui::RichText::new("Startup & updates").size(14.0).color(design::TEXT));
+        ui.add_space(8.0);
+        let mut autostart_on = self.autostart_enabled;
+        if self.toggle_row(ui, "Run on startup", "Launch automatically when you log in", autostart_on) {
+            autostart_on = !autostart_on;
+            let _ = autostart::set_enabled(autostart_on);
+            self.autostart_enabled = autostart::is_enabled();
+        }
+        ui.add_space(10.0);
+        if ui.button("Check for updates").clicked() {
+            *self.update_status.lock().unwrap() = Some("Checking…".to_string());
+            let status = self.update_status.clone();
+            updater::check_for_update_async(env!("CARGO_PKG_VERSION"), move |result| {
+                let text = match result {
+                    Some(v) => format!("Update available: {v}"),
+                    None => "You're up to date.".to_string(),
+                };
+                *status.lock().unwrap() = Some(text);
+            });
+        }
+        if let Some(status) = self.update_status.lock().unwrap().as_ref() {
+            ui.label(egui::RichText::new(status).size(12.0).color(design::NEUTRAL_600));
+        }
+    }
+
+    fn theme_tab(&mut self, ui: &mut egui::Ui) {
+        self.heading(ui, "Theme", "Visual theme applied to the break overlay and corner timer.");
+
+        egui::Grid::new("theme-grid").spacing([14.0, 14.0]).show(ui, |ui| {
+            for (i, &t) in Theme::all().iter().enumerate() {
+                let active = self.cfg.theme == t;
+                let (bg, _panel, accent, text) = crate::theme::palette(t);
+                let (fill, stroke) = if active {
+                    (design::ACCENT_100, egui::Stroke::new(1.5_f32, design::ACCENT))
+                } else {
+                    (egui::Color32::TRANSPARENT, egui::Stroke::new(1.0_f32, design::DIVIDER))
+                };
+                let resp = egui::Frame::none()
+                    .fill(fill)
+                    .stroke(stroke)
+                    .rounding(design::RADIUS_MD)
+                    .inner_margin(12.0)
+                    .show(ui, |ui| {
+                        ui.set_width(140.0);
+                        ui.horizontal(|ui| {
+                            for c in [bg, accent, text] {
+                                let (r, _resp) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+                                ui.painter().rect_filled(r, 3.0, c);
+                                ui.painter().rect_stroke(r, 3.0, egui::Stroke::new(1.0_f32, design::DIVIDER));
+                            }
+                        });
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new(t.label()).size(13.0).color(design::TEXT));
+                    })
+                    .response;
+                if ui.interact(resp.rect, resp.id.with("theme-card"), egui::Sense::click()).clicked() {
+                    self.cfg.theme = t;
+                    self.save_cfg();
+                }
+                if (i + 1) % 3 == 0 {
+                    ui.end_row();
+                }
+            }
+        });
+    }
+
+    fn sound_tab(&mut self, ui: &mut egui::Ui) {
+        self.heading(ui, "Sound", "What plays when a break overlay appears.");
+
+        let options = ["None", "Chime", "Bell", "Custom"];
+        let current = match self.cfg.sound {
+            SoundChoice::None => 0,
+            SoundChoice::Chime => 1,
+            SoundChoice::Bell => 2,
+            SoundChoice::Custom(_) => 3,
+        };
+        if let Some(i) = design::segmented(ui, &options, current) {
+            self.cfg.sound = match i {
+                0 => SoundChoice::None,
+                1 => SoundChoice::Chime,
+                2 => SoundChoice::Bell,
+                _ => SoundChoice::Custom(String::new()),
+            };
+            self.save_cfg();
+        }
+
+        ui.add_space(16.0);
+        if ui.button("🔔  Preview sound").clicked() {
+            crate::sounds::play(&self.cfg.sound);
+        }
+
+        if let SoundChoice::Custom(_) = &self.cfg.sound {
+            ui.add_space(20.0);
+            ui.label(egui::RichText::new("Custom sound path").size(12.0).color(design::NEUTRAL_600));
+            let mut path = match &self.cfg.sound {
+                SoundChoice::Custom(p) => p.clone(),
+                _ => String::new(),
+            };
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut path).hint_text("/home/you/sounds/chime.ogg"),
+            );
+            if resp.changed() {
+                self.cfg.sound = SoundChoice::Custom(path);
+                self.save_cfg();
+            }
+        }
+    }
+
+    fn pomodoro_tab(&mut self, ui: &mut egui::Ui) {
+        self.heading(ui, "Pomodoro", "An alternate scheduler that alternates work and break phases.");
+
+        if self.toggle_row(
+            ui,
+            "Enable Pomodoro mode",
+            "Takes over scheduling from the plain interval in General",
+            self.cfg.pomodoro_enabled,
+        ) {
+            self.cfg.pomodoro_enabled = !self.cfg.pomodoro_enabled;
+            self.save_cfg();
+        }
+
+        ui.add_space(20.0);
+        ui.columns(2, |cols| {
+            cols[0].label(egui::RichText::new("Work (min)").size(12.0).color(design::NEUTRAL_600));
+            if cols[0].add(egui::DragValue::new(&mut self.cfg.pomodoro_work_mins).range(1..=120)).changed() {
+                self.save_cfg();
+            }
+            cols[1].label(egui::RichText::new("Short break (min)").size(12.0).color(design::NEUTRAL_600));
+            if cols[1].add(egui::DragValue::new(&mut self.cfg.pomodoro_short_break_mins).range(1..=60)).changed() {
+                self.save_cfg();
+            }
+        });
+        ui.add_space(10.0);
+        ui.columns(2, |cols| {
+            cols[0].label(egui::RichText::new("Long break (min)").size(12.0).color(design::NEUTRAL_600));
+            if cols[0].add(egui::DragValue::new(&mut self.cfg.pomodoro_long_break_mins).range(1..=120)).changed() {
+                self.save_cfg();
+            }
+            cols[1].label(egui::RichText::new("Cycles before long break").size(12.0).color(design::NEUTRAL_600));
+            if cols[1].add(egui::DragValue::new(&mut self.cfg.pomodoro_cycles_before_long_break).range(1..=12)).changed() {
+                self.save_cfg();
+            }
+        });
+
+        ui.add_space(24.0);
+        ui.label(egui::RichText::new("Cycle preview").size(12.0).color(design::NEUTRAL_600));
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            let cycles = self.cfg.pomodoro_cycles_before_long_break.max(1);
+            for i in 0..cycles {
+                tag(ui, "Work", design::ACCENT_100, design::ACCENT_800);
+                let is_last = i + 1 == cycles;
+                tag(ui, if is_last { "Long" } else { "Short" }, design::NEUTRAL_200, design::TEXT);
+            }
+        });
+    }
+
+    fn schedule_tab(&mut self, ui: &mut egui::Ui) {
+        self.heading(ui, "Workday schedule", "Restrict reminders to certain hours and days.");
+
+        if self.toggle_row(
+            ui,
+            "Only remind during workday hours",
+            "Outside this window, breaks stay silent",
+            self.cfg.workday_enabled,
+        ) {
+            self.cfg.workday_enabled = !self.cfg.workday_enabled;
+            self.save_cfg();
+        }
+
+        ui.add_space(20.0);
+        ui.horizontal(|ui| {
+            let start_frac = (self.cfg.workday_start_hour % 12) as f32 / 12.0
+                + self.cfg.workday_start_minute as f32 / 720.0;
+            let end_frac = (self.cfg.workday_end_hour % 12) as f32 / 12.0
+                + self.cfg.workday_end_minute as f32 / 720.0;
+            design::clock_face(ui, 140.0, start_frac, end_frac);
+            ui.add_space(32.0);
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.colored_label(design::ACCENT, "●");
+                    ui.label(egui::RichText::new("Start").size(12.5).color(design::TEXT));
+                });
+                let mut changed = false;
+                ui.horizontal(|ui| {
+                    changed |= ui.add(egui::DragValue::new(&mut self.cfg.workday_start_hour).range(0..=23)).changed();
+                    ui.label(":");
+                    changed |= ui.add(egui::DragValue::new(&mut self.cfg.workday_start_minute).range(0..=59)).changed();
+                });
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.colored_label(design::ACCENT_800, "●");
+                    ui.label(egui::RichText::new("End").size(12.5).color(design::TEXT));
+                });
+                ui.horizontal(|ui| {
+                    changed |= ui.add(egui::DragValue::new(&mut self.cfg.workday_end_hour).range(0..=23)).changed();
+                    ui.label(":");
+                    changed |= ui.add(egui::DragValue::new(&mut self.cfg.workday_end_minute).range(0..=59)).changed();
+                });
+                if changed {
+                    self.save_cfg();
+                }
+            });
+        });
+
+        ui.add_space(20.0);
+        ui.label(egui::RichText::new("Active days").size(12.0).color(design::NEUTRAL_600));
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            let day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+            for (i, name) in day_names.iter().enumerate() {
+                if design::chip(ui, name, self.cfg.workday_days[i]).clicked() {
+                    self.cfg.workday_days[i] = !self.cfg.workday_days[i];
+                    self.save_cfg();
+                }
+            }
+        });
+
+        ui.add_space(24.0);
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::DIVIDER));
+        ui.add_space(16.0);
+        ui.label(egui::RichText::new("Smart pausing").size(14.0).color(design::TEXT));
+        ui.add_space(8.0);
+        if self.toggle_row(
+            ui,
+            "Pause while idle",
+            "No keyboard/mouse input for a while means nobody's there",
+            self.cfg.idle_pause_enabled,
+        ) {
+            self.cfg.idle_pause_enabled = !self.cfg.idle_pause_enabled;
+            self.save_cfg();
+        }
+        if self.cfg.idle_pause_enabled {
+            ui.horizontal(|ui| {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new("Idle after (min):").size(12.0).color(design::NEUTRAL_600));
+                if ui.add(egui::DragValue::new(&mut self.cfg.idle_pause_after_mins).range(1..=60)).changed() {
+                    self.save_cfg();
+                }
+            });
+        }
+        ui.add_space(10.0);
+        if self.toggle_row(
+            ui,
+            "Don't interrupt fullscreen apps",
+            "Calls, presentations, and video stay uninterrupted",
+            self.cfg.fullscreen_pause_enabled,
+        ) {
+            self.cfg.fullscreen_pause_enabled = !self.cfg.fullscreen_pause_enabled;
+            self.save_cfg();
+        }
+    }
+
+    fn stats_tab(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Usage stats").size(21.0).strong().color(design::TEXT));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let options = ["90d", "30d", "7d"];
+                let current = match self.stats_period_days {
+                    90 => 0,
+                    30 => 1,
+                    _ => 2,
+                };
+                if let Some(i) = design::segmented(ui, &options, current) {
+                    self.stats_period_days = [90, 30, 7][i];
+                }
+            });
+        });
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new("Device activity, so you can see how much screen time these breaks are covering.")
+                .size(12.5)
+                .color(design::NEUTRAL_600),
+        );
+        ui.add_space(18.0);
+
+        let today = today_usage_secs(&self.usage);
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(format!("{}h {}m", today / 3600, (today % 3600) / 60))
+                    .size(30.0)
+                    .strong()
+                    .color(design::TEXT),
+            );
+            ui.label(egui::RichText::new("today so far").size(12.0).color(design::NEUTRAL_600));
+        });
+
+        ui.add_space(14.0);
+        usage_bar_chart(ui, &usage_last_n_days(&self.usage, self.stats_period_days));
+
+        ui.add_space(24.0);
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::DIVIDER));
+        ui.add_space(16.0);
+        ui.label(egui::RichText::new("Most active hours").size(14.0).color(design::TEXT));
+        ui.label(
+            egui::RichText::new("Darker wedges mean more device activity in that hour, over the selected period.")
+                .size(12.0)
+                .color(design::NEUTRAL_600),
+        );
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            let fractions = hourly_activity_fractions(&self.usage, self.stats_period_days);
+            design::activity_wheel(ui, 160.0, &fractions);
+        });
     }
 }
 
-/// A simple daily-usage bar chart, painted by hand (no charting crate) so
-/// it's trivial to restyle once a real design lands — colors come straight
-/// from `ui.visuals()`, and the whole thing is one self-contained function.
-/// Hovering a bar shows the exact date/duration in a tooltip.
-fn usage_bar_chart(ui: &mut egui::Ui, days: &[DailyUsage]) {
+fn tag(ui: &mut egui::Ui, label: &str, bg: egui::Color32, text_color: egui::Color32) {
+    egui::Frame::none()
+        .fill(bg)
+        .rounding(3.0)
+        .inner_margin(egui::Margin::symmetric(10.0, 3.0))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(label).size(11.0).color(text_color));
+        });
+}
+
+/// A simple daily-usage bar chart, painted by hand — colors come from the
+/// Classical design tokens so it matches the rest of the window.
+fn usage_bar_chart(ui: &mut egui::Ui, days: &[crate::stats::DailyUsage]) {
     if days.is_empty() {
-        ui.label("No usage recorded yet.");
+        ui.label(egui::RichText::new("No usage recorded yet.").color(design::NEUTRAL_600));
         return;
     }
 
-    const CHART_HEIGHT: f32 = 140.0;
-    const BAR_GAP: f32 = 10.0;
+    const CHART_HEIGHT: f32 = 130.0;
     const LABEL_HEIGHT: f32 = 18.0;
 
     let desired_size = egui::vec2(ui.available_width(), CHART_HEIGHT + LABEL_HEIGHT);
@@ -390,43 +598,32 @@ fn usage_bar_chart(ui: &mut egui::Ui, days: &[DailyUsage]) {
 
     let max_secs = days.iter().map(|d| d.active_secs).max().unwrap_or(1).max(1);
     let bar_count = days.len() as f32;
-    let bar_w = (rect.width() - BAR_GAP * (bar_count - 1.0).max(0.0)) / bar_count;
-
-    let accent = ui.visuals().selection.bg_fill;
-    let track = ui.visuals().widgets.noninteractive.bg_fill;
-    let text_color = ui.visuals().text_color();
+    let gap = if bar_count > 20.0 { 2.0 } else { 6.0 };
+    let bar_w = (rect.width() - gap * (bar_count - 1.0).max(0.0)) / bar_count;
 
     for (i, day) in days.iter().enumerate() {
-        let x0 = rect.left() + i as f32 * (bar_w + BAR_GAP);
+        let x0 = rect.left() + i as f32 * (bar_w + gap);
         let x1 = x0 + bar_w;
 
         let bar_h = CHART_HEIGHT * (day.active_secs as f32 / max_secs as f32).clamp(0.02, 1.0);
-        let track_rect =
-            egui::Rect::from_min_max(egui::pos2(x0, rect.top()), egui::pos2(x1, rect.top() + CHART_HEIGHT));
         let bar_rect = egui::Rect::from_min_max(
             egui::pos2(x0, rect.top() + CHART_HEIGHT - bar_h),
             egui::pos2(x1, rect.top() + CHART_HEIGHT),
         );
+        painter.rect_filled(bar_rect, 2.0, design::ACCENT_500);
 
-        painter.rect_filled(track_rect, 3.0, track);
-        painter.rect_filled(bar_rect, 3.0, accent);
+        if days.len() <= 14 {
+            let short_label = day.date.get(5..).unwrap_or(&day.date);
+            painter.text(
+                egui::pos2(x0 + bar_w / 2.0, rect.top() + CHART_HEIGHT + LABEL_HEIGHT / 2.0),
+                egui::Align2::CENTER_CENTER,
+                short_label,
+                egui::FontId::proportional(10.0),
+                design::NEUTRAL_600,
+            );
+        }
 
-        // Day label (short weekday-ish suffix of the ISO date) under the bar.
-        let short_label = day.date.get(5..).unwrap_or(&day.date); // "MM-DD"
-        painter.text(
-            egui::pos2(x0 + bar_w / 2.0, rect.top() + CHART_HEIGHT + LABEL_HEIGHT / 2.0),
-            egui::Align2::CENTER_CENTER,
-            short_label,
-            egui::FontId::proportional(11.0),
-            text_color,
-        );
-
-        // Hover tooltip with the exact value.
-        let hover_response = ui.interact(
-            track_rect,
-            ui.id().with(("usage-bar", i)),
-            egui::Sense::hover(),
-        );
+        let hover_response = ui.interact(bar_rect, ui.id().with(("usage-bar", i)), egui::Sense::hover());
         if hover_response.hovered() {
             egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("usage-tip"), |ui| {
                 ui.label(format!(
@@ -438,4 +635,5 @@ fn usage_bar_chart(ui: &mut egui::Ui, days: &[DailyUsage]) {
             });
         }
     }
+    painter.hline(rect.x_range(), rect.top() + CHART_HEIGHT, egui::Stroke::new(1.0_f32, design::DIVIDER));
 }

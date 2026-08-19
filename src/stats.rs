@@ -14,6 +14,16 @@ pub struct DailyUsage {
     pub date: String,
     /// Accumulated active seconds recorded for this date.
     pub active_secs: u64,
+    /// Accumulated active seconds recorded for this date, broken down by
+    /// hour-of-day (UTC, index 0 = 00:00-00:59, ..., 23 = 23:00-23:59) — the
+    /// "most active hours" wheel's data source. `#[serde(default)]` so
+    /// entries recorded before this field existed still deserialize.
+    #[serde(default = "default_hourly_secs")]
+    pub hourly_secs: [u64; 24],
+}
+
+fn default_hourly_secs() -> [u64; 24] {
+    [0; 24]
 }
 
 /// Rolling log of daily device-usage time, persisted as JSON next to
@@ -119,14 +129,19 @@ fn now_epoch() -> u64 {
 #[allow(dead_code)]
 pub fn record_tick(log: &mut UsageLog, elapsed_secs: u64) {
     let today = today_string();
+    let hour = ((now_epoch() % 86_400) / 3600) as usize;
     match log.days.last_mut() {
         Some(last) if last.date == today => {
             last.active_secs = last.active_secs.saturating_add(elapsed_secs);
+            last.hourly_secs[hour] = last.hourly_secs[hour].saturating_add(elapsed_secs);
         }
         _ => {
+            let mut hourly_secs = [0u64; 24];
+            hourly_secs[hour] = elapsed_secs;
             log.days.push(DailyUsage {
                 date: today,
                 active_secs: elapsed_secs,
+                hourly_secs,
             });
         }
     }
@@ -154,6 +169,28 @@ pub fn usage_last_n_days(log: &UsageLog, n: usize) -> Vec<DailyUsage> {
     log.days[start..].to_vec()
 }
 
+/// Returns each hour-of-day's share (0.0-1.0) of that hour's busiest peer
+/// across the last `n` days — the "most active hours" wheel's data.
+/// Normalized against the single busiest hour in the period (rather than
+/// each day's own total) so the wheel reads as "when", not "how much
+/// overall", matching the design's per-hour intensity wedges.
+#[allow(dead_code)]
+pub fn hourly_activity_fractions(log: &UsageLog, n: usize) -> [f32; 24] {
+    let days = usage_last_n_days(log, n);
+    let mut totals = [0u64; 24];
+    for day in &days {
+        for (h, secs) in day.hourly_secs.iter().enumerate() {
+            totals[h] = totals[h].saturating_add(*secs);
+        }
+    }
+    let max = totals.iter().copied().max().unwrap_or(0).max(1);
+    let mut fractions = [0.0f32; 24];
+    for (h, total) in totals.iter().enumerate() {
+        fractions[h] = *total as f32 / max as f32;
+    }
+    fractions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +212,7 @@ mod tests {
         log.days.push(DailyUsage {
             date: "2000-01-01".to_string(),
             active_secs: 42,
+            hourly_secs: [0; 24],
         });
         assert_eq!(usage_last_n_days(&log, 1).len(), 1);
     }
