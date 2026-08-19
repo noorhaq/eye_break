@@ -9,6 +9,7 @@ authors = ["Noor ul haq"]
 maintainer = "Noor ul haq"
 copyright = "2026, Noor ul haq"
 depends = "$auto, libgtk-3-0, libx11-6"
+recommends = "pulseaudio-utils | alsa-utils"
 section = "utils"
 priority = "optional"
 extended-description = """
