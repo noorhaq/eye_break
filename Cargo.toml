@@ -1,6 +1,6 @@
 [package]
 name = "eye-break"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "Periodic eye-break reminders with guided exercises"
 authors = ["Noor ul haq"]
