@@ -122,3 +122,7 @@ cargo build --release   # optimized build, what gets packaged
 (`--overlay`, `--timer`, `--settings`) runs as its own short-lived process,
 spawned by the tray/scheduler in `src/tray.rs`, so they don't have to share
 an event loop with it.
+
+## License
+
+[GPL-3.0-or-later](LICENSE).
