@@ -123,6 +123,10 @@ cargo build --release   # optimized build, what gets packaged
 spawned by the tray/scheduler in `src/tray.rs`, so they don't have to share
 an event loop with it.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for what's changed in each release.
+
 ## License
 
 [GPL-3.0-or-later](LICENSE).
