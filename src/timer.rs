@@ -140,10 +140,8 @@ impl eframe::App for TimerApp {
                     // showing once that unrelated countdown runs out.
                     let (remaining, elapsed_frac, label) = if self.cfg.pomodoro_enabled {
                         let pcfg = PomodoroConfig::from(&self.cfg);
-                        let due = self.pomodoro_state.phase_due_epoch(&pcfg);
-                        let remaining = due.saturating_sub(now_epoch());
-                        let total = self.pomodoro_state.phase_duration_secs(&pcfg).max(1);
-                        let elapsed_frac = 1.0 - (remaining as f32 / total as f32).clamp(0.0, 1.0);
+                        let (remaining, elapsed_frac) =
+                            self.pomodoro_state.phase_progress(&pcfg, now_epoch());
                         (remaining, elapsed_frac, self.pomodoro_state.phase.label())
                     } else {
                         let interval = self.cfg.interval_secs.max(1);

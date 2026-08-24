@@ -115,6 +115,21 @@ impl PomodoroState {
     pub fn phase_duration_secs(&self, cfg: &PomodoroConfig) -> u64 {
         self.phase.duration_secs(cfg)
     }
+
+    /// `(seconds remaining, fraction of the phase elapsed)` for the current
+    /// phase as of `now_epoch_secs` — what the corner countdown paints when
+    /// Pomodoro mode is active. Pulled out as a pure function (rather than
+    /// inlined in timer.rs's painting code) so it's unit-testable on its
+    /// own: this is the exact math that used to be missing entirely, which
+    /// left the countdown stuck at 00:00 once its (unrelated, plain-
+    /// interval) countdown ran out instead of tracking the real phase.
+    pub fn phase_progress(&self, cfg: &PomodoroConfig, now_epoch_secs: u64) -> (u64, f32) {
+        let due = self.phase_due_epoch(cfg);
+        let remaining = due.saturating_sub(now_epoch_secs);
+        let total = self.phase_duration_secs(cfg).max(1);
+        let elapsed_frac = 1.0 - (remaining as f32 / total as f32).clamp(0.0, 1.0);
+        (remaining, elapsed_frac)
+    }
 }
 
 /// Advances `state` to the next phase if the current phase's duration has
@@ -122,7 +137,20 @@ impl PomodoroState {
 /// Returns true if the phase just changed, so a caller can show a
 /// notification/overlay for the transition.
 pub fn tick(state: &mut PomodoroState, cfg: &PomodoroConfig) -> bool {
-    if now_epoch() < state.phase_due_epoch(cfg) {
+    if !advance_if_due(state, cfg, now_epoch()) {
+        return false;
+    }
+    state.save();
+    true
+}
+
+/// The pure phase-advance decision behind `tick`, split out so it can be
+/// unit tested without touching disk (`state.save()`) or depending on the
+/// real wall clock. If `state`'s current phase has elapsed as of
+/// `now_epoch_secs`, advances it to the next phase (resetting
+/// `phase_started_epoch` to `now_epoch_secs`) and returns true.
+fn advance_if_due(state: &mut PomodoroState, cfg: &PomodoroConfig, now_epoch_secs: u64) -> bool {
+    if now_epoch_secs < state.phase_due_epoch(cfg) {
         return false;
     }
 
@@ -137,8 +165,7 @@ pub fn tick(state: &mut PomodoroState, cfg: &PomodoroConfig) -> bool {
         }
         PomodoroPhase::ShortBreak | PomodoroPhase::LongBreak => PomodoroPhase::Work,
     };
-    state.phase_started_epoch = now_epoch();
-    state.save();
+    state.phase_started_epoch = now_epoch_secs;
     true
 }
 
@@ -152,4 +179,99 @@ pub fn pomodoro_due(state: &mut PomodoroState, cfg: &Config) -> bool {
     let pcfg = PomodoroConfig::from(cfg);
     let phase_changed = tick(state, &pcfg);
     phase_changed && matches!(state.phase, PomodoroPhase::ShortBreak | PomodoroPhase::LongBreak)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg() -> PomodoroConfig {
+        PomodoroConfig {
+            work_mins: 25,
+            short_break_mins: 5,
+            long_break_mins: 15,
+            cycles_before_long_break: 4,
+        }
+    }
+
+    /// This is the exact math timer.rs's corner countdown was missing
+    /// entirely before this fix — it used to compute remaining time
+    /// against the plain interval scheduler even in Pomodoro mode, a
+    /// schedule nothing was actually driving.
+    #[test]
+    fn phase_progress_at_phase_start_is_full_and_unelapsed() {
+        let cfg = cfg();
+        let state = PomodoroState {
+            phase: PomodoroPhase::Work,
+            cycles_completed: 0,
+            phase_started_epoch: 1_000,
+        };
+        let (remaining, elapsed_frac) = state.phase_progress(&cfg, 1_000);
+        assert_eq!(remaining, 25 * 60);
+        assert_eq!(elapsed_frac, 0.0);
+    }
+
+    #[test]
+    fn phase_progress_halfway_through() {
+        let cfg = cfg();
+        let state = PomodoroState {
+            phase: PomodoroPhase::ShortBreak,
+            cycles_completed: 1,
+            phase_started_epoch: 1_000,
+        };
+        let half = (5 * 60) / 2;
+        let (remaining, elapsed_frac) = state.phase_progress(&cfg, 1_000 + half);
+        assert_eq!(remaining, 5 * 60 - half);
+        assert!((elapsed_frac - 0.5).abs() < 0.01);
+    }
+
+    /// Before this fix, once the (wrong) countdown timer.rs displayed ran
+    /// out, `remaining` never moved again — because it was tracking a
+    /// scheduler that Pomodoro mode had bypassed. `phase_progress` must
+    /// clamp cleanly to `(0, 1.0)` here, not panic or go negative, since
+    /// this is exactly the "past due" instant the corner card renders
+    /// while waiting for the next `tick()` (driven by tray.rs) to flip the
+    /// phase and reset `phase_started_epoch`.
+    #[test]
+    fn phase_progress_past_due_clamps_to_zero_remaining() {
+        let cfg = cfg();
+        let state = PomodoroState {
+            phase: PomodoroPhase::Work,
+            cycles_completed: 0,
+            phase_started_epoch: 1_000,
+        };
+        let (remaining, elapsed_frac) = state.phase_progress(&cfg, 1_000 + 25 * 60 + 500);
+        assert_eq!(remaining, 0);
+        assert_eq!(elapsed_frac, 1.0);
+    }
+
+    #[test]
+    fn tick_cycles_work_short_break_and_long_break_in_order() {
+        let cfg = cfg();
+        let mut state = PomodoroState {
+            phase: PomodoroPhase::Work,
+            cycles_completed: 0,
+            phase_started_epoch: now_epoch(),
+        };
+
+        // Force each phase to already be due, then advance one tick at a
+        // time, checking the sequence: Work -> Short -> Work -> Short ->
+        // Work -> Short -> Work -> Long (4th work cycle) -> Work.
+        let expected = [
+            PomodoroPhase::ShortBreak,
+            PomodoroPhase::Work,
+            PomodoroPhase::ShortBreak,
+            PomodoroPhase::Work,
+            PomodoroPhase::ShortBreak,
+            PomodoroPhase::Work,
+            PomodoroPhase::LongBreak,
+            PomodoroPhase::Work,
+        ];
+        for want in expected {
+            state.phase_started_epoch = 0; // guarantee the phase is due
+            let changed = advance_if_due(&mut state, &cfg, i64::MAX as u64);
+            assert!(changed, "expected a phase change to {want:?}");
+            assert_eq!(state.phase, want);
+        }
+    }
 }
