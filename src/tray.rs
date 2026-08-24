@@ -215,6 +215,17 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
         // the icon vanish, the instant `build_tick` returns.
         let _tray = &_tray;
 
+        // Pick up whatever's on disk before doing anything else this tick.
+        // `config` was loaded once when this closure was built, and every
+        // local mutation below re-saves it immediately — but the Settings
+        // window runs as its own separate process, and any change made
+        // there (e.g. corner timer opacity) only reaches *this* process by
+        // being written to config.json. Without this reload, the next
+        // `cfg.save()` from a menu toggle or `trigger_break()` would
+        // overwrite that on-disk change with our stale in-memory copy,
+        // making Settings changes appear to silently revert.
+        *config.borrow_mut() = Config::load();
+
         // Handle menu events.
         while let Ok(event) = menu_channel.try_recv() {
             if event.id == toggle_id {

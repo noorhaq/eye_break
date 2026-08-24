@@ -65,6 +65,16 @@ impl PomodoroPhase {
         };
         mins as u64 * 60
     }
+
+    /// Short label for the current phase, shown by the corner countdown in
+    /// place of the plain scheduler's "NEXT BREAK IN".
+    pub fn label(self) -> &'static str {
+        match self {
+            PomodoroPhase::Work => "FOCUS TIME",
+            PomodoroPhase::ShortBreak => "SHORT BREAK",
+            PomodoroPhase::LongBreak => "LONG BREAK",
+        }
+    }
 }
 
 fn pomodoro_state_path() -> PathBuf {
@@ -98,6 +108,12 @@ impl PomodoroState {
     /// Epoch seconds at which the current phase is due to end.
     pub fn phase_due_epoch(&self, cfg: &PomodoroConfig) -> u64 {
         self.phase_started_epoch + self.phase.duration_secs(cfg)
+    }
+
+    /// Total length of the current phase, in seconds — the denominator for
+    /// a "time elapsed in this phase" progress display.
+    pub fn phase_duration_secs(&self, cfg: &PomodoroConfig) -> u64 {
+        self.phase.duration_secs(cfg)
     }
 }
 

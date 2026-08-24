@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::design;
 use crate::monitors::primary_monitor;
+use crate::pomodoro::{PomodoroConfig, PomodoroState};
 use crate::state::{now_epoch, State};
 use eframe::egui;
 use std::time::{Duration, Instant};
@@ -50,6 +51,7 @@ struct TimerApp {
     last_poll: Instant,
     cfg: Config,
     state: State,
+    pomodoro_state: PomodoroState,
 }
 
 impl TimerApp {
@@ -58,6 +60,7 @@ impl TimerApp {
             last_poll: Instant::now() - Duration::from_secs(10),
             cfg: Config::load(),
             state: State::load(),
+            pomodoro_state: PomodoroState::load(),
         }
     }
 }
@@ -85,6 +88,7 @@ impl eframe::App for TimerApp {
         if self.last_poll.elapsed() >= Duration::from_secs(1) {
             self.cfg = Config::load();
             self.state = State::load();
+            self.pomodoro_state = PomodoroState::load();
             self.last_poll = Instant::now();
         }
 
@@ -127,10 +131,27 @@ impl eframe::App for TimerApp {
                         faded(design::text(), op),
                     );
                 } else {
-                    let interval = self.cfg.interval_secs.max(1);
-                    let next = self.state.next_break_epoch(interval);
-                    let remaining = next.saturating_sub(now_epoch());
-                    let elapsed_frac = 1.0 - (remaining as f32 / interval as f32).clamp(0.0, 1.0);
+                    // Pomodoro mode replaces the plain interval scheduler
+                    // entirely (see tray.rs's scheduler tick), so the
+                    // countdown has to follow `PomodoroState` here too —
+                    // otherwise this card keeps counting down against the
+                    // General-tab interval, a schedule nothing is actually
+                    // driving, and sits at 00:00 without a break ever
+                    // showing once that unrelated countdown runs out.
+                    let (remaining, elapsed_frac, label) = if self.cfg.pomodoro_enabled {
+                        let pcfg = PomodoroConfig::from(&self.cfg);
+                        let due = self.pomodoro_state.phase_due_epoch(&pcfg);
+                        let remaining = due.saturating_sub(now_epoch());
+                        let total = self.pomodoro_state.phase_duration_secs(&pcfg).max(1);
+                        let elapsed_frac = 1.0 - (remaining as f32 / total as f32).clamp(0.0, 1.0);
+                        (remaining, elapsed_frac, self.pomodoro_state.phase.label())
+                    } else {
+                        let interval = self.cfg.interval_secs.max(1);
+                        let next = self.state.next_break_epoch(interval);
+                        let remaining = next.saturating_sub(now_epoch());
+                        let elapsed_frac = 1.0 - (remaining as f32 / interval as f32).clamp(0.0, 1.0);
+                        (remaining, elapsed_frac, "NEXT BREAK IN")
+                    };
 
                     painter.circle_stroke(
                         ring_center,
@@ -155,7 +176,7 @@ impl eframe::App for TimerApp {
                     painter.text(
                         label_pos,
                         egui::Align2::LEFT_CENTER,
-                        "NEXT BREAK IN",
+                        label,
                         egui::FontId::proportional(10.5),
                         faded(design::neutral_600(), op),
                     );
