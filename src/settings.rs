@@ -95,7 +95,7 @@ impl SettingsApp {
 
 impl eframe::App for SettingsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        design::apply(ctx, self.cfg.theme);
+        design::apply(ctx);
 
         egui::SidePanel::left("nav")
             .exact_width(210.0)

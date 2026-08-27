@@ -59,8 +59,8 @@ jobs:
           Section: utils
           Priority: optional
           Architecture: amd64
-          Depends: ${DEPS}
-          Recommends: pulseaudio-utils | alsa-utils, xprintidle, x11-utils, xdotool, wmctrl
+          Depends: ${DEPS}, x11-utils, xdotool, wmctrl, xprintidle, x11-xserver-utils
+          Recommends: pulseaudio-utils | alsa-utils
           Maintainer: Noor ul haq
           Description: Periodic eye-break reminders with guided exercises
            Eye Break sits in your tray and reminds you to take periodic eye

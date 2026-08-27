@@ -1,24 +1,19 @@
 //! Visual chrome for the Settings window, ported from the "Classical" design
-//! (warm/editorial layout — sidebar nav, radial gauges, card-elevated
+//! (warm/editorial palette, sidebar nav, radial gauges, card-elevated
 //! content) at claude.ai/design — see `Eye Break Settings.dc.html` in that
 //! project.
 //!
-//! Unlike the layout, the *colors* are not fixed: the Settings window now
-//! follows the same user-selectable `Theme` as the break overlay/corner
-//! timer, so picking e.g. "Nord" in Settings recolors Settings itself too.
-//! `palette_for()` below derives a complete, contrast-aware, properly
-//! saturated 12-color palette procedurally from each theme's 4 base colors
-//! (`theme::palette`) — tints/shades are generated relative to that theme's
-//! own darkness, not just the original warm palette's fixed offsets slapped
-//! onto different hues, which would produce muddy or illegible results for
-//! e.g. the dark themes.
+//! This is deliberately separate from `theme.rs`: `theme::Theme` is a
+//! *user-facing setting* that controls the break overlay's look, while this
+//! module is the app's own fixed chrome — not configurable, the same way a
+//! website's chrome doesn't change even if it lets you pick a dark/light
+//! reading mode for content. The Settings window and the corner timer both
+//! stay on `CLASSICAL` regardless of the selected Theme.
 //!
-//! The corner timer is the one exception: it never calls `apply()`, so its
-//! thread-local palette stays at `CLASSICAL` — it deliberately keeps its own
-//! fixed look regardless of the selected Theme (a prior, explicit decision;
-//! see `timer.rs`).
+//! Colors are still routed through a thread-local `Palette` and the
+//! accessor functions below rather than plain consts, so the painting code
+//! has one place to read from if the chrome ever needs to vary again.
 
-use crate::theme::Theme;
 use eframe::egui;
 use std::cell::Cell;
 
@@ -86,13 +81,6 @@ pub fn neutral_600() -> egui::Color32 { PALETTE.with(|p| p.get().neutral_600) }
 pub fn divider() -> egui::Color32 { PALETTE.with(|p| p.get().divider) }
 pub fn is_dark() -> bool { PALETTE.with(|p| p.get().is_dark) }
 
-/// Perceptual luminance in 0.0..1.0, used to decide whether a theme's base
-/// colors read as a dark or light scheme (drives which direction tints get
-/// generated in).
-fn luminance(c: egui::Color32) -> f32 {
-    (0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32) / 255.0
-}
-
 fn lerp_rgb(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
     let t = t.clamp(0.0, 1.0);
     egui::Color32::from_rgb(
@@ -106,57 +94,9 @@ fn lighten(c: egui::Color32, t: f32) -> egui::Color32 {
     lerp_rgb(c, egui::Color32::WHITE, t)
 }
 
+#[allow(dead_code)] // kept for API symmetry with `lighten`
 fn darken(c: egui::Color32, t: f32) -> egui::Color32 {
     lerp_rgb(c, egui::Color32::BLACK, t)
-}
-
-/// Derives a full `Palette` from a `Theme`'s 4 base colors
-/// (`theme::palette`). The direction every tint/shade is generated in
-/// depends on whether the theme reads as dark or light — mixing toward
-/// white for a light theme's highlight backgrounds would make no sense for
-/// a dark one (and vice versa for the "readable accent text" shades), so
-/// this isn't the same fixed offsets reused across themes; each theme gets
-/// tints that are actually legible and saturated against its own base.
-pub fn palette_for(theme: Theme) -> Palette {
-    let (bg, surface, accent, text) = crate::theme::palette(theme);
-    let dark = luminance(bg) < 0.5;
-
-    let (accent_100, accent_300, accent_700, accent_800, neutral_200) = if dark {
-        (
-            lerp_rgb(surface, accent, 0.22),
-            lerp_rgb(surface, accent, 0.45),
-            lighten(accent, 0.22),
-            lighten(accent, 0.40),
-            lerp_rgb(surface, text, 0.12),
-        )
-    } else {
-        (
-            lerp_rgb(egui::Color32::WHITE, accent, 0.12),
-            lerp_rgb(egui::Color32::WHITE, accent, 0.38),
-            darken(accent, 0.28),
-            darken(accent, 0.45),
-            lerp_rgb(egui::Color32::WHITE, text, 0.10),
-        )
-    };
-    let accent_500 = if dark { lighten(accent, 0.08) } else { darken(accent, 0.10) };
-    let neutral_600 = lerp_rgb(bg, text, 0.55);
-    let divider = egui::Color32::from_rgba_premultiplied(text.r(), text.g(), text.b(), 40);
-
-    Palette {
-        bg,
-        surface,
-        text,
-        accent,
-        accent_100,
-        accent_300,
-        accent_500,
-        accent_700,
-        accent_800,
-        neutral_200,
-        neutral_600,
-        divider,
-        is_dark: dark,
-    }
 }
 
 pub const RADIUS_MD: f32 = 4.0;
@@ -217,11 +157,11 @@ pub fn heading_font(size: f32) -> egui::FontId {
 /// Resolves `theme`'s palette, stashes it in the thread-local so every
 /// widget function below picks it up, and applies it to the egui visuals —
 /// call once per frame before drawing the settings window's panels.
-pub fn apply(ctx: &egui::Context, theme: Theme) {
-    let palette = palette_for(theme);
+pub fn apply(ctx: &egui::Context) {
+    let palette = CLASSICAL;
     PALETTE.with(|p| p.set(palette));
 
-    let mut visuals = if palette.is_dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+    let mut visuals = egui::Visuals::light();
     visuals.override_text_color = Some(palette.text);
     visuals.window_fill = palette.bg;
     visuals.panel_fill = palette.bg;
@@ -239,11 +179,7 @@ pub fn apply(ctx: &egui::Context, theme: Theme) {
     // presets — visibly clashing with our own themed surfaces if left
     // as-is (a near-black input on a themed dark-blue card, for example).
     // Tie it to the same palette instead.
-    visuals.extreme_bg_color = if palette.is_dark {
-        darken(palette.surface, 0.18)
-    } else {
-        lighten(palette.surface, 0.6)
-    };
+    visuals.extreme_bg_color = lighten(palette.surface, 0.6);
     ctx.set_visuals(visuals);
 }
 

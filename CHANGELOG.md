@@ -6,6 +6,17 @@ All notable changes to Eye Break are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- Solarized is now the default theme for new installs (was Dark). Existing
+  `config.json` files already record an explicit `theme`, so this changes
+  nothing for current users — pick it in Settings › Theme.
+- The Settings window is back to its fixed warm "Classical" palette
+  regardless of the selected Theme, reverting the 0.5.0 change that made it
+  follow the theme. `Theme` once again applies to the break overlay only,
+  which is what its own description in Settings has always said. The
+  procedurally-derived per-theme palette (`design::palette_for`) is gone;
+  `design::apply` no longer takes a `Theme`.
+
 ### Added
 - `README.md` with installation (`.deb`, macOS zip, from-source), CLI, and
   config-file-location documentation.
@@ -14,6 +25,23 @@ All notable changes to Eye Break are documented here. Format follows
   phase-cycle ordering).
 
 ### Fixed
+- Break overlays no longer appear while a fullscreen app is focused. The
+  check shelled out to `xdotool`, which is only a `Recommends` and so is
+  absent on a `dpkg -i` install; being fail-open, a missing tool silently
+  disabled fullscreen suppression entirely. It now reads the focused
+  window from the root `_NET_ACTIVE_WINDOW` property via `xprop`, with
+  `xdotool` kept only as a fallback.
+- The overlay's "OK, I'm done" / "Skip" buttons are no longer swallowed by
+  the taskbar. They were anchored 70px above the screen bottom — inside the
+  strip a dock occupies — and the always-on-top re-assertion that was meant
+  to keep the overlay above the dock depends on `wmctrl`/`xdotool`, absent
+  for the same packaging reason, leaving the break undismissable by mouse.
+  The buttons now sit just below the countdown text.
+- `xdotool`, `wmctrl`, `xprintidle`, `x11-utils`, and `x11-xserver-utils`
+  are now hard `Depends` rather than `Recommends`. Every feature built on
+  them (fullscreen suppression, always-on-top, idle-based smart pause,
+  multi-monitor geometry) fails open, so on a `dpkg -i` install they were
+  all silently inert.
 - The `.deb` no longer installs an unlaunchable binary. Its `Depends` was
   hand-written in the release workflow and listed only `libgtk-3-0` and
   `libx11-6`, omitting `libxdo3` (linked by `tray-icon`); on a machine

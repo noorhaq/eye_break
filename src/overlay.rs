@@ -172,7 +172,7 @@ impl eframe::App for OverlayApp {
                     egui::Color32::from_rgba_unmultiplied(180, 180, 180, (255.0 * alpha) as u8),
                 );
 
-                // Two buttons side by side, centered near the bottom: "OK,
+                // Two buttons side by side, below the countdown: "OK,
                 // I'm done" dismisses right now with no effect on the next
                 // break's schedule; "Skip" also dismisses now but pushes the
                 // next break out by the snooze length.
@@ -180,7 +180,18 @@ impl eframe::App for OverlayApp {
                 let skip_size = egui::vec2(230.0, 40.0);
                 let gap = 12.0;
                 let total_w = ok_size.x + gap + skip_size.x;
-                let row_y = screen.bottom() - 70.0;
+                // Anchored to the centered content block, not to
+                // `screen.bottom()`. The overlay covers the whole monitor
+                // including the strip the taskbar/dock occupies, and a dock
+                // that keeps itself above us (or that we failed to out-raise,
+                // e.g. wmctrl/xdotool missing) would otherwise sit directly on
+                // top of buttons parked 70px off the bottom edge, leaving the
+                // break undismissable by mouse. Sitting just under the
+                // countdown text keeps them clear of any plausible dock while
+                // grouping them with the content they belong to. The `min`
+                // only matters on unusually short screens, where it pulls the
+                // row back up rather than letting it run off the bottom.
+                let row_y = (center.y + 175.0).min(screen.bottom() - 120.0);
                 let ok_rect = egui::Rect::from_center_size(
                     egui::pos2(center.x - total_w / 2.0 + ok_size.x / 2.0, row_y),
                     ok_size,
