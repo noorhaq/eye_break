@@ -15,7 +15,11 @@ const MARGIN: f32 = 16.0;
 /// window's Classical design. Runs as its own long-lived process so it
 /// doesn't have to share an event loop with the GTK-driven tray icon.
 pub fn run_timer() -> eframe::Result<()> {
-    crate::raise::keep_on_top_in_background();
+    // Capture *before* our own window exists, so this can't ever pick up
+    // our own (about to be created) window instead of whatever the user
+    // was actually using.
+    let original_focus = crate::raise::capture_focused_window();
+    crate::raise::keep_on_top_in_background(original_focus);
 
     let mon = primary_monitor();
     let x = mon.x as f32 + mon.w as f32 - WIN_W - MARGIN;

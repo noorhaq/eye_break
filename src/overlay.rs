@@ -1,16 +1,25 @@
 use crate::config::Config;
 use crate::exercises::{self, Exercise};
 use crate::monitors::MonitorRect;
+use crate::raise;
 use crate::state::{self, State};
 use eframe::egui;
 use std::time::{Duration, Instant};
+
+/// How often to poll the real (root-window) mouse position for the
+/// click-through hit-test, in milliseconds. Independent of the ~33ms paint
+/// loop below — each poll shells out to `xdotool`, so this stays coarser
+/// than every frame. 50ms is still well under normal hover-before-click
+/// reaction time, so the buttons don't feel laggy to reach.
+const MOUSE_POLL_MS: u64 = 50;
 
 pub fn run_overlay(
     rect: MonitorRect,
     display_secs: f32,
     exercise_index: usize,
+    original_focus: Option<String>,
 ) -> eframe::Result<()> {
-    crate::raise::keep_on_top_in_background();
+    raise::keep_on_top_in_background(original_focus);
 
     let viewport = egui::ViewportBuilder::default()
         .with_position(egui::pos2(rect.x as f32, rect.y as f32))
@@ -19,7 +28,14 @@ pub fn run_overlay(
         .with_transparent(true)
         .with_always_on_top()
         .with_taskbar(false)
-        .with_resizable(false);
+        .with_resizable(false)
+        // Click-through by default — see OverlayApp's mouse-passthrough
+        // handling below for why, and how the buttons still work despite
+        // this. Without it, the overlay (a normal top-level window covering
+        // the *entire* monitor) would swallow every click anywhere on
+        // screen for the whole break, not just clicks on its own buttons —
+        // exactly the "it takes over the mouse" complaint.
+        .with_mouse_passthrough(true);
 
     let options = eframe::NativeOptions {
         viewport,
@@ -30,29 +46,40 @@ pub fn run_overlay(
     eframe::run_native(
         "eye-break-overlay",
         options,
-        Box::new(move |_cc| Ok(Box::new(OverlayApp::new(display_secs, exercise_index)))),
+        Box::new(move |_cc| Ok(Box::new(OverlayApp::new(rect, display_secs, exercise_index)))),
     )
 }
 
 struct OverlayApp {
+    rect: MonitorRect,
     start: Instant,
     display_secs: f32,
     exercise: &'static Exercise,
     reminder_text: String,
     my_dismiss_token: u64,
     last_state_poll: Instant,
+    last_mouse_poll: Instant,
+    mouse_pos: Option<(f32, f32)>,
+    passthrough: bool,
 }
 
 impl OverlayApp {
-    fn new(display_secs: f32, exercise_index: usize) -> Self {
+    fn new(rect: MonitorRect, display_secs: f32, exercise_index: usize) -> Self {
         let my_dismiss_token = State::load().dismiss_token;
         Self {
+            rect,
             start: Instant::now(),
             display_secs,
             exercise: exercises::get(exercise_index),
             reminder_text: Config::load().reminder_text,
             my_dismiss_token,
             last_state_poll: Instant::now(),
+            last_mouse_poll: Instant::now() - Duration::from_millis(MOUSE_POLL_MS),
+            mouse_pos: None,
+            // Matches the ViewportBuilder default above; kept in sync with
+            // the actual window state by set_passthrough below rather than
+            // re-sent unconditionally every frame.
+            passthrough: true,
         }
     }
 
@@ -85,6 +112,51 @@ impl OverlayApp {
         st.dismiss_token += 1;
         st.save();
     }
+
+    /// Re-queries the real mouse position (throttled) via `xdotool`, since
+    /// egui's own pointer tracking goes blind the instant mouse
+    /// pass-through is engaged — see `raise::global_mouse_pos`.
+    fn poll_mouse(&mut self) {
+        if self.last_mouse_poll.elapsed() < Duration::from_millis(MOUSE_POLL_MS) {
+            return;
+        }
+        self.last_mouse_poll = Instant::now();
+        self.mouse_pos = raise::global_mouse_pos();
+    }
+
+    /// Enables mouse pass-through everywhere on this window except while
+    /// the cursor sits over one of `hit_rects` (button bounds, in this
+    /// window's local/logical coordinates) — so the break overlay never
+    /// blocks clicks into whatever the user was doing underneath, while its
+    /// own buttons stay clickable. Only actually sends the viewport command
+    /// on a change, not every frame.
+    fn update_passthrough(&mut self, ctx: &egui::Context, hit_rects: &[egui::Rect]) {
+        let ppp = ctx.pixels_per_point();
+        // Where the window manager *actually* placed this window, not where
+        // we asked for it to go — Mutter, at least, nudges an undecorated
+        // window requested at (0, 0) down below the top panel (observed:
+        // requested (0, 0), landed at (0, 32)) despite always-on-top and no
+        // decorations. Using the requested `rect.x/y` here instead of this
+        // reads the mouse position ~32px off from where egui itself thinks
+        // it is, and the button hit-test silently never matches.
+        let origin = ctx
+            .input(|i| i.viewport().inner_rect)
+            .map(|r| r.min)
+            .unwrap_or(egui::pos2(self.rect.x as f32, self.rect.y as f32));
+        let hovering = self.mouse_pos.is_some_and(|(mx, my)| {
+            // xdotool reports physical root-window pixels; hit_rects are in
+            // this window's logical points, offset by the window's own
+            // actual on-screen position.
+            let local = egui::pos2(mx / ppp - origin.x, my / ppp - origin.y);
+            hit_rects.iter().any(|r| r.contains(local))
+        });
+
+        let want_passthrough = !hovering;
+        if want_passthrough != self.passthrough {
+            self.passthrough = want_passthrough;
+            ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(want_passthrough));
+        }
+    }
 }
 
 impl eframe::App for OverlayApp {
@@ -110,6 +182,8 @@ impl eframe::App for OverlayApp {
             std::process::exit(0);
         }
 
+        self.poll_mouse();
+
         // Fade in/out slightly at the edges for a softer feel.
         let fade = 0.3_f32.min(self.display_secs / 4.0);
         let alpha = if elapsed < fade {
@@ -120,11 +194,19 @@ impl eframe::App for OverlayApp {
             1.0
         };
 
+        let mut hit_rects: Vec<egui::Rect> = Vec::with_capacity(2);
+
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(egui::Color32::from_rgba_unmultiplied(
                 0,
                 0,
                 0,
+                // While click-through, don't dim/cover the screen at all —
+                // only the tiny hovered-button hit box is ever "solid" from
+                // the window manager's perspective, but the dim fill is
+                // still painted every frame for the visual effect
+                // regardless of passthrough state (passthrough only
+                // affects input routing, not rendering).
                 (180.0 * alpha) as u8,
             )))
             .show(ctx, |ui| {
@@ -189,6 +271,12 @@ impl eframe::App for OverlayApp {
                     egui::pos2(center.x + total_w / 2.0 - skip_size.x / 2.0, row_y),
                     skip_size,
                 );
+                // A little slack around the visible button bounds so the
+                // passthrough toggle (driven by a throttled, external mouse
+                // poll rather than egui's own now-blind pointer tracking)
+                // engages a beat before the cursor is exactly on the edge.
+                hit_rects.push(ok_rect.expand(6.0));
+                hit_rects.push(skip_rect.expand(6.0));
 
                 let text_alpha = (255.0 * alpha) as u8;
                 let make_button = |label: String, fill: u8| {
@@ -236,6 +324,8 @@ impl eframe::App for OverlayApp {
                     std::process::exit(0);
                 }
             });
+
+        self.update_passthrough(ctx, &hit_rects);
 
         ctx.request_repaint_after(Duration::from_millis(33));
     }

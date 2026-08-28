@@ -33,10 +33,19 @@ fn main() {
             let h: u32 = args[5].parse().unwrap_or(1080);
             let display_secs: f32 = args.get(6).and_then(|s| s.parse().ok()).unwrap_or(5.0);
             let exercise_index: usize = args.get(7).and_then(|s| s.parse().ok()).unwrap_or(0);
+            // The window that had keyboard focus right before *any* of this
+            // break's overlays were created, captured once by the
+            // tray/scheduler and passed down to every per-monitor child —
+            // rather than each child re-querying it independently, which
+            // would risk one child picking up a sibling's already-mapped
+            // overlay window instead of whatever the user was actually
+            // using. Empty string means the tray couldn't determine one.
+            let original_focus = args.get(8).filter(|s| !s.is_empty()).cloned();
             let _ = overlay::run_overlay(
                 monitors::MonitorRect { x, y, w, h, primary: false },
                 display_secs,
                 exercise_index,
+                original_focus,
             );
         }
         Some("--timer") => {

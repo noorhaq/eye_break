@@ -14,6 +14,23 @@ All notable changes to Eye Break are documented here. Format follows
   phase-cycle ordering).
 
 ### Fixed
+- The break overlay no longer takes over the mouse and keyboard for its
+  whole 5-30s duration. It's a normal top-level window covering the entire
+  monitor, so previously it silently absorbed every click anywhere on
+  screen — not just clicks on its own "OK"/"Skip" buttons — meaning you
+  couldn't click back into whatever you were doing (an editor, a chat)
+  until it closed. It's now click-through everywhere except directly over
+  its own buttons, toggled dynamically as the cursor moves (real mouse
+  position is polled independently of egui's own pointer tracking, since
+  that goes blind the instant click-through engages — a chicken-and-egg
+  problem inherent to this kind of overlay). Also stopped it from
+  potentially stealing keyboard focus away from whatever you were typing
+  into the moment it appeared: the window manager doing that on window-map
+  is a WM-specific new/mapped-window heuristic, not something a window
+  fully controls itself, so instead the app now explicitly hands focus
+  back to whichever window had it right before the break was triggered,
+  each time the overlay's on-top guard loop reasserts (using a focus
+  primitive that doesn't also re-raise its target over the overlay).
 - The `.deb` no longer installs an unlaunchable binary. Its `Depends` was
   hand-written in the release workflow and listed only `libgtk-3-0` and
   `libx11-6`, omitting `libxdo3` (linked by `tray-icon`); on a machine

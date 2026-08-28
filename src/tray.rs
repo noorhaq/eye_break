@@ -383,6 +383,12 @@ fn trigger_break(cfg: &mut Config) {
     let monitors = list_monitors();
     let exe = std::env::current_exe().unwrap_or_else(|_| "eye-break".into());
     let exercise_index = cfg.next_exercise;
+    // Captured once, before any overlay window exists, and handed to every
+    // per-monitor child — so each one can hand focus straight back to
+    // whatever the user was actually typing into instead of stealing it.
+    // Querying this independently per-child would risk one child observing
+    // a sibling's already-mapped overlay as "active" instead.
+    let original_focus = crate::raise::capture_focused_window().unwrap_or_default();
     for m in monitors {
         let _ = std::process::Command::new(&exe)
             .arg("--overlay")
@@ -392,6 +398,7 @@ fn trigger_break(cfg: &mut Config) {
             .arg(m.h.to_string())
             .arg(cfg.display_secs.to_string())
             .arg(exercise_index.to_string())
+            .arg(&original_focus)
             .spawn();
     }
     cfg.next_exercise = (exercise_index + 1) % exercises::count();
