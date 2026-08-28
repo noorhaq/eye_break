@@ -304,8 +304,23 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
 
         // On the idle -> active transition, reset the schedule's baseline to
         // "now" rather than leaving it at whenever the last break was, so
-        // returning from being away doesn't immediately ambush the user with
-        // a break for time they weren't even at the desk for.
+        // returning from being away (including reconnecting a remote/RDP
+        // session after it sat idle) doesn't immediately ambush the user
+        // with a break for time they weren't even at the desk for.
+        //
+        // Both schedulers need this, not just the plain-interval one:
+        // Pomodoro mode tracks its own separate `phase_started_epoch`, and
+        // — critically — `pomodoro_due` is simply never called at all while
+        // `cached_is_idle` is true (see the `due` block below), so that
+        // clock doesn't freeze on its own the way it might appear to. It
+        // just stops being *read*, so nothing advances the phase forward
+        // while idle — but its start time is also never pushed forward,
+        // so the instant the user comes back, `now - phase_started_epoch`
+        // is however long they were actually away. If that's longer than
+        // the phase's own length (a 10-minute Work phase after a 20-minute
+        // RDP disconnect, say), the very first tick after reconnecting
+        // sees the phase as already overdue and fires a break immediately
+        // — the exact "ambushed the moment I reconnect" symptom.
         if cached_is_idle {
             was_idle = true;
         } else if was_idle {
@@ -313,6 +328,10 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
             let mut st = State::load();
             st.last_break_epoch = now_epoch();
             st.save();
+
+            let mut pstate = pomodoro_state.borrow_mut();
+            pstate.phase_started_epoch = now_epoch();
+            pstate.save();
         }
 
         // Usage-stats: this tick fires every 500ms, so accumulate a whole

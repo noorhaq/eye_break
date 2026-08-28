@@ -9,8 +9,14 @@ license = "GPL-3.0-or-later"
 [package.metadata.deb]
 maintainer = "Noor ul haq"
 copyright = "2026, Noor ul haq"
-depends = "$auto, libgtk-3-0, libx11-6"
-recommends = "pulseaudio-utils | alsa-utils, xprintidle, x11-utils, xdotool, wmctrl"
+# $auto covers linked libraries only (via dpkg-shlibdeps) — it can't see the
+# CLI tools shelled out to at runtime, so those are hand-listed as hard
+# Depends, not Recommends: without xrandr (x11-xserver-utils) the overlay
+# can't position itself across real monitors, without xdotool+xprop
+# (x11-utils) fullscreen/idle-aware pausing and staying above other windows
+# fail open silently, and without xprintidle idle-pause never engages.
+depends = "$auto, libgtk-3-0, libx11-6, xdotool, wmctrl, x11-utils, x11-xserver-utils, xprintidle"
+recommends = "pulseaudio-utils | alsa-utils"
 section = "utils"
 priority = "optional"
 extended-description = """

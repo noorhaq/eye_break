@@ -43,6 +43,40 @@ All notable changes to Eye Break are documented here. Format follows
   autostart). The app-menu launcher now runs `eye-break --open`, which
   starts the tray/scheduler if needed and opens (or raises) Settings; the
   autostart entry is now its own separate `.desktop` file, unchanged.
+- A break could ambush you the instant you reconnected to a remote (RDP/
+  VNC) session after being away for a while, in Pomodoro mode. The
+  idle → active transition reset the plain-interval scheduler's baseline
+  so returning from idle wouldn't immediately trigger a break, but
+  Pomodoro mode tracks its own separate phase clock and that wasn't reset
+  the same way — a Work phase that finished while you were away (idle
+  detection only pauses *new* breaks, it doesn't rewind a phase already
+  overdue) fired the moment your very next input arrived. Returning from
+  idle now resets both schedulers' baselines.
+- Fullscreen-aware pausing missed real-world fullscreen apps that don't
+  set the formal `_NET_WM_STATE_FULLSCREEN` window state — some games and
+  players resize themselves to cover the screen directly rather than
+  asking the window manager for fullscreen. Detection now also checks
+  `_NET_WM_BYPASS_COMPOSITOR` (the hint most video players/games set
+  regardless) and falls back to comparing the active window's geometry
+  against the real monitor list, so a borderless window that exactly
+  covers a monitor counts as fullscreen even with neither hint set.
+- The `.deb`'s `Depends` was missing `x11-xserver-utils` (`xrandr`)
+  entirely, and had `xdotool`/`wmctrl`/`x11-utils`/`xprintidle` listed
+  under `Recommends` rather than `Depends` — skipped by a plain `dpkg -i`
+  and any install done without `apt`'s recommends resolution. Every one of
+  those tools backs a feature that fails *open* (silently does nothing)
+  rather than erroring when missing: no correctly-positioned multi-monitor
+  overlay without `xrandr`, no fullscreen/idle-aware pausing without
+  `xdotool`+`xprop`, no staying above other windows without `wmctrl`. On
+  an install missing any of them, the app runs but quietly loses exactly
+  the anti-disruption behavior it's supposed to have — indistinguishable
+  from those features being broken. All five are now hard `Depends`;
+  `dpkg-shlibdeps` only ever covered linked libraries, never these
+  shelled-out CLI tools, so this needed a manual audit of every
+  `Command::new(...)` call rather than something the automatic derivation
+  could catch. Existing installs missing them can be fixed with
+  `sudo apt-get install -f` (or `sudo apt-get install xdotool wmctrl
+  x11-utils x11-xserver-utils xprintidle` directly).
 
 ## [0.5.0] - 2026-08-19
 

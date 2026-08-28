@@ -44,6 +44,17 @@ jobs:
           # hand-written list silently dropped it once already (installs fine,
           # then fails at startup with "libxdo.so.3: cannot open shared object
           # file"). dpkg-shlibdeps reads the actual DT_NEEDED entries.
+          #
+          # This only ever covers *linked libraries* though — it cannot see
+          # the CLI tools the app shells out to at runtime (xrandr, xdotool,
+          # wmctrl, xprop, xprintidle), so those are appended by hand below.
+          # They used to be Recommends-only, which `dpkg -i`/many minimal
+          # installs skip entirely; without them each feature they back
+          # fails open (silently does nothing) rather than erroring, which
+          # is the "why is this still disrupting me" bug class: no dimmed
+          # multi-monitor overlay without xrandr (x11-xserver-utils), no
+          # fullscreen/idle-aware pausing without xdotool+xprop (x11-utils)
+          # +xprintidle, no staying above other windows without wmctrl.
           mkdir -p "$PKG/debian"
           printf 'Source: eye-break\n' > "$PKG/debian/control"
           DEPS=$(cd "$PKG" && dpkg-shlibdeps -O --ignore-missing-info usr/bin/eye-break \
@@ -59,8 +70,8 @@ jobs:
           Section: utils
           Priority: optional
           Architecture: amd64
-          Depends: ${DEPS}
-          Recommends: pulseaudio-utils | alsa-utils, xprintidle, x11-utils, xdotool, wmctrl
+          Depends: ${DEPS}, xdotool, wmctrl, x11-utils, x11-xserver-utils, xprintidle
+          Recommends: pulseaudio-utils | alsa-utils
           Maintainer: Noor ul haq
           Description: Periodic eye-break reminders with guided exercises
            Eye Break sits in your tray and reminds you to take periodic eye
