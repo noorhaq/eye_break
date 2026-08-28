@@ -23,6 +23,19 @@ use std::time::Duration;
 /// — unlike `windowactivate`, it does *not* also raise its target, so it
 /// can safely fight to keep focus on the user's app while our window stays
 /// visually on top via the separate raise calls above.
+///
+/// Only ever pass `Some` here for a window that's guaranteed to be
+/// short-lived (the break overlay, which auto-closes within seconds and
+/// whose background thread dies with the process) — never for a
+/// long-running one like the corner timer. This loop never stops on its
+/// own; for a process that runs the whole session, continuously forcing
+/// focus back onto whatever was focused *when that process started*
+/// fights every subsequent click into any other window, indefinitely,
+/// which is a much worse bug than the one-time focus-steal-on-creation
+/// this is meant to correct (previously shipped this way for the timer —
+/// symptom was VS Code becoming totally unresponsive to clicks/typing
+/// until eye-break itself was killed, since nothing short of that stopped
+/// the fight).
 pub fn keep_on_top_in_background(restore_focus_to: Option<String>) {
     let pid = std::process::id();
     std::thread::spawn(move || loop {

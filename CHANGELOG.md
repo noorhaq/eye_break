@@ -25,6 +25,19 @@ All notable changes to Eye Break are documented here. Format follows
   phase-cycle ordering).
 
 ### Fixed
+- VS Code (and presumably other apps sensitive to it) could become totally
+  unresponsive to clicks and typing — not just during a break, but for the
+  rest of the session — until eye-break itself was killed. The corner
+  countdown, which runs continuously for as long as eye-break does, had
+  picked up the *previous* fix's "hand focus back to whatever the overlay
+  interrupted" mechanism too, but that mechanism has no natural end for a
+  process that never stops running: it captured whatever was focused the
+  moment the countdown started (e.g. at login) and then fought to force
+  focus back onto that one specific window every 400ms, forever — including
+  fighting every later click into anything else, indefinitely, not just
+  around a single break. The break overlay itself keeps this behavior
+  (correct there — it's bounded to a few seconds and the fight ends the
+  moment it closes); the corner countdown no longer does.
 - The break overlay no longer takes over the mouse and keyboard for its
   whole 5-30s duration. It's a normal top-level window covering the entire
   monitor, so previously it silently absorbed every click anywhere on

@@ -15,11 +15,19 @@ const MARGIN: f32 = 16.0;
 /// window's Classical design. Runs as its own long-lived process so it
 /// doesn't have to share an event loop with the GTK-driven tray icon.
 pub fn run_timer() -> eframe::Result<()> {
-    // Capture *before* our own window exists, so this can't ever pick up
-    // our own (about to be created) window instead of whatever the user
-    // was actually using.
-    let original_focus = crate::raise::capture_focused_window();
-    crate::raise::keep_on_top_in_background(original_focus);
+    // Stay raised above other windows, but — unlike the break overlay —
+    // deliberately *not* fighting to keep input focus pinned anywhere.
+    // This process runs for the entire session, not just a few seconds
+    // during a break: continuously forcing focus back onto whatever
+    // happened to be focused when the timer started would fight every
+    // future click into any other window, indefinitely, for as long as
+    // eye-break keeps running — not a one-off "give focus back after this
+    // break" correction, which is what that mechanism is meant for. This
+    // window is permanently mouse-pass-through and has no interactive
+    // elements, so it never legitimately grabs focus by itself in the
+    // first place; the only real risk was a brief steal on creation, which
+    // isn't worth an unbounded fight to guard against.
+    crate::raise::keep_on_top_in_background(None);
 
     let mon = primary_monitor();
     let x = mon.x as f32 + mon.w as f32 - WIN_W - MARGIN;
