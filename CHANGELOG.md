@@ -25,6 +25,37 @@ All notable changes to Eye Break are documented here. Format follows
   phase-cycle ordering).
 
 ### Fixed
+- Focus hand-back after a break (see the corner-countdown fix just below —
+  this is the *other* half of that same bug report) didn't reliably work
+  for VS Code specifically, even once the corner countdown was no longer
+  the cause: it used `xdotool windowfocus`, which sets input focus via a
+  direct `XSetInputFocus` call, bypassing the window manager's normal
+  `_NET_ACTIVE_WINDOW` activation protocol. Mutter's own bookkeeping
+  updated fine either way, but Electron's own X11 focus tracking — used by
+  VS Code, apparently stricter about this than plain GTK apps or a full
+  browser window, which is why this was VS-Code-specific — didn't reliably
+  pick it up: VS Code looked "active" per the window manager while still
+  not accepting clicks or keystrokes. Switched to `xdotool windowactivate`
+  first (the real EWMH client message a normal Alt-Tab or taskbar click
+  uses, which every app is built to handle correctly), immediately
+  followed by re-raising our own window to undo the raise that comes with
+  it, with `windowfocus` kept as a fallback since `windowactivate`'s
+  request can itself be silently ignored by Mutter's own focus-stealing
+  prevention in some circumstances.
+- Spawned break-overlay and Settings child processes were never reaped
+  once they exited (`Command::spawn()` alone doesn't do this — something
+  has to `wait()` on the `Child` after), leaving a `<defunct>` zombie
+  process-table entry for each one until eye-break itself quit. Harmless
+  by itself, but accumulates for as long as eye-break runs — found
+  dozens after Pomodoro mode had been quietly firing real breaks in the
+  background for a few hours during testing. Each fire-and-forget spawn
+  now hands its `Child` to a background thread that just waits on it.
+- `eye-break status` showed `next_break_in` computed against the plain
+  interval even when Pomodoro mode was on, describing a schedule nothing
+  was actually driving (Pomodoro replaces it entirely) — misleading
+  during the exact kind of debugging this update grew out of. Now shows
+  `pomodoro_phase` and its own remaining time instead, when Pomodoro mode
+  is enabled.
 - VS Code (and presumably other apps sensitive to it) could become totally
   unresponsive to clicks and typing — not just during a break, but for the
   rest of the session — until eye-break itself was killed. The corner

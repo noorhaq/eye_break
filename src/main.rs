@@ -118,13 +118,9 @@ fn main() {
             let cfg = Config::load();
             let st = state::State::load();
             let paused = st.is_manually_paused();
-            let remaining = (cfg.enabled && !paused).then(|| {
-                st.next_break_epoch(cfg.interval_secs)
-                    .saturating_sub(state::now_epoch())
-            });
             println!(
-                "enabled: {}\ninterval_secs: {}\ndisplay_secs: {}\nsnooze_secs: {}\nshow_timer: {}",
-                cfg.enabled, cfg.interval_secs, cfg.display_secs, cfg.snooze_secs, cfg.show_timer
+                "enabled: {}\ninterval_secs: {}\ndisplay_secs: {}\nsnooze_secs: {}\nshow_timer: {}\npomodoro_enabled: {}",
+                cfg.enabled, cfg.interval_secs, cfg.display_secs, cfg.snooze_secs, cfg.show_timer, cfg.pomodoro_enabled
             );
             match st.manual_pause_until_epoch {
                 Some(u) if paused && u == state::MANUAL_PAUSE_INDEFINITE => {
@@ -136,7 +132,29 @@ fn main() {
                 }
                 _ => println!("paused: no"),
             }
-            if let Some(r) = remaining {
+            // Pomodoro mode replaces the plain-interval scheduler entirely
+            // (see tray.rs's scheduler tick) — showing `next_break_in`
+            // against `interval_secs` while it's on would describe a
+            // schedule nothing is actually driving, exactly the confusion
+            // that cost real debugging time tracking down a "still losing
+            // focus" report that turned out to be genuine Pomodoro breaks
+            // firing on their own cycle the whole time.
+            if !cfg.enabled || paused {
+                // Covered by the enabled/paused lines above already.
+            } else if cfg.pomodoro_enabled {
+                let pstate = pomodoro::PomodoroState::load();
+                let pcfg = pomodoro::PomodoroConfig::from(&cfg);
+                let (remaining, _) = pstate.phase_progress(&pcfg, state::now_epoch());
+                println!(
+                    "pomodoro_phase: {} ({}m{}s left)",
+                    pstate.phase.label(),
+                    remaining / 60,
+                    remaining % 60
+                );
+            } else {
+                let r = st
+                    .next_break_epoch(cfg.interval_secs)
+                    .saturating_sub(state::now_epoch());
                 println!("next_break_in: {}m{}s", r / 60, r % 60);
             }
         }

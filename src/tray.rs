@@ -65,11 +65,33 @@ fn build_icon() -> tray_icon::Icon {
     tray_icon::Icon::from_rgba(rgba, SIZE, SIZE).expect("failed to build tray icon")
 }
 
+/// Spawns a command and reaps it in a background thread once it exits,
+/// without blocking the caller — for the fire-and-forget children (break
+/// overlays, the Settings window) whose `Command`/`Child` we don't keep
+/// around. `Command::spawn()` alone leaves a zombie process-table entry
+/// once the child exits until something `wait()`s on it; this tray process
+/// runs indefinitely, so those would otherwise accumulate for as long as
+/// eye-break keeps running (observed directly during development: dozens
+/// of `<defunct>` children after enough breaks had fired).
+fn spawn_detached(cmd: &mut std::process::Command) {
+    if let Ok(mut child) = cmd.spawn() {
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
+}
+
 /// Spawns the persistent corner-countdown process if enabled, killing any
 /// previous instance first so toggling / restarts don't leak processes.
 fn sync_timer_process(exe: &std::path::Path, cfg: &Config, handle: &Rc<RefCell<Option<Child>>>) {
     if let Some(mut child) = handle.borrow_mut().take() {
+        // `kill()` alone doesn't reap the process — still need `wait()`
+        // after, or it joins the same zombie-accumulation problem
+        // `spawn_detached` exists to avoid (this one's bounded, at most
+        // once per "Show corner countdown" toggle, but still worth
+        // cleaning up rather than leaving a dangling child).
         let _ = child.kill();
+        let _ = child.wait();
     }
     if cfg.show_timer {
         if let Ok(child) = std::process::Command::new(exe).arg("--timer").spawn() {
@@ -318,7 +340,7 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
                 reset_pomodoro_baseline(&pomodoro_state);
                 println!("[eye-break] paused for {}min", secs / 60);
             } else if event.id == settings_id {
-                let _ = std::process::Command::new(&exe_tick).arg("--settings").spawn();
+                spawn_detached(std::process::Command::new(&exe_tick).arg("--settings"));
             } else if event.id == quit_id {
                 if let Some(mut child) = timer_child_tick.borrow_mut().take() {
                     let _ = child.kill();
@@ -484,16 +506,17 @@ fn trigger_break(cfg: &mut Config) {
     // a sibling's already-mapped overlay as "active" instead.
     let original_focus = crate::raise::capture_focused_window().unwrap_or_default();
     for m in monitors {
-        let _ = std::process::Command::new(&exe)
-            .arg("--overlay")
-            .arg(m.x.to_string())
-            .arg(m.y.to_string())
-            .arg(m.w.to_string())
-            .arg(m.h.to_string())
-            .arg(cfg.display_secs.to_string())
-            .arg(exercise_index.to_string())
-            .arg(&original_focus)
-            .spawn();
+        spawn_detached(
+            std::process::Command::new(&exe)
+                .arg("--overlay")
+                .arg(m.x.to_string())
+                .arg(m.y.to_string())
+                .arg(m.w.to_string())
+                .arg(m.h.to_string())
+                .arg(cfg.display_secs.to_string())
+                .arg(exercise_index.to_string())
+                .arg(&original_focus),
+        );
     }
     cfg.next_exercise = (exercise_index + 1) % exercises::count();
     cfg.save();

@@ -18,11 +18,26 @@ use std::time::Duration;
 /// auto-focused by the window manager anyway (Mutter's default "focus new
 /// windows" policy), which is what actually pulls keystrokes away from
 /// whatever the user was typing into the instant a break overlay appears.
-/// `xdotool windowfocus` sets input focus directly via `XSetInputFocus`
-/// without going through the window manager's `_NET_ACTIVE_WINDOW` request
-/// — unlike `windowactivate`, it does *not* also raise its target, so it
-/// can safely fight to keep focus on the user's app while our window stays
-/// visually on top via the separate raise calls above.
+///
+/// This uses `xdotool windowactivate` on the target, immediately followed
+/// by re-raising *our own* window — not `xdotool windowfocus`, which was
+/// tried first and confirmed insufficient specifically for VS Code (an
+/// Electron app): `windowfocus` sets input focus directly via
+/// `XSetInputFocus`, bypassing the window manager's normal
+/// `_NET_ACTIVE_WINDOW` activation protocol entirely. Mutter's own
+/// bookkeeping (what `xprop -root _NET_ACTIVE_WINDOW` reports) updates
+/// fine either way, but Chromium/Electron's own X11 focus tracking — used
+/// by VS Code, and apparently stricter about this than plain GTK apps or a
+/// full browser window — didn't reliably pick it up, leaving VS Code
+/// visibly "active" per the window manager while still not accepting
+/// clicks or keystrokes. `windowactivate` sends the real EWMH
+/// `_NET_ACTIVE_WINDOW` client message — the exact mechanism a normal
+/// Alt-Tab or taskbar click uses, which every app (Electron included) is
+/// built to handle correctly. Its downside is that it also raises its
+/// target, which would otherwise leave the target sitting on top of our
+/// (dimmed) overlay — so this re-raises our own window immediately after,
+/// netting out to: target window properly activated, our window still
+/// topmost in the final stacking order.
 ///
 /// Only ever pass `Some` here for a window that's guaranteed to be
 /// short-lived (the break overlay, which auto-closes within seconds and
@@ -39,12 +54,25 @@ use std::time::Duration;
 pub fn keep_on_top_in_background(restore_focus_to: Option<String>) {
     let pid = std::process::id();
     std::thread::spawn(move || loop {
-        assert_above_once(pid);
+        // Order matters: activate the target first (which also raises it),
+        // then re-raise ourselves — so our window is the one left on top
+        // once both complete, while the target still gets a real
+        // WM-mediated activation. `windowactivate`'s EWMH request can be
+        // silently ignored by Mutter's own focus-stealing prevention in
+        // some circumstances (observed directly during development), so
+        // `windowfocus` follows as a direct-`XSetInputFocus` fallback —
+        // redundant on its own for VS Code specifically, but harmless, and
+        // still the thing that actually works for apps `windowactivate`
+        // doesn't reach.
         if let Some(win) = &restore_focus_to {
+            let _ = std::process::Command::new("xdotool")
+                .args(["windowactivate", win])
+                .output();
             let _ = std::process::Command::new("xdotool")
                 .args(["windowfocus", win])
                 .output();
         }
+        assert_above_once(pid);
         std::thread::sleep(Duration::from_millis(400));
     });
 }
