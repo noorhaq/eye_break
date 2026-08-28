@@ -23,6 +23,18 @@ All notable changes to Eye Break are documented here. Format follows
   Short Break / Long Break) when Pomodoro mode is enabled, instead of
   counting down against the unrelated plain-interval schedule — previously
   it would hit 00:00 with no break shown and never reset.
+- "Check for updates" no longer calls GitHub's API directly (60
+  requests/hour, per IP, shared with everything else on a user's network —
+  doesn't scale across installs and can fail for reasons unrelated to
+  eye-break). It now reads `version.json` off the project website instead,
+  which has no comparable limit.
+- Clicking the app icon now actually opens Settings. It used to run the
+  exact same silent, window-less launch as the autostart entry — fine at
+  login, but clicking the icon looked like nothing had happened, and did
+  nothing at all if a tray/scheduler was already running (e.g. from
+  autostart). The app-menu launcher now runs `eye-break --open`, which
+  starts the tray/scheduler if needed and opens (or raises) Settings; the
+  autostart entry is now its own separate `.desktop` file, unchanged.
 
 ## [0.5.0] - 2026-08-19
 

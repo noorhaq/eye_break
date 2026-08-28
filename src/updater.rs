@@ -1,17 +1,34 @@
-//! Checks GitHub for a newer release of eye-break.
+//! Checks for a newer release of eye-break.
 //!
-//! Not wired into the tray menu yet — a future integration pass is expected
-//! to call `check_for_update` (typically on a background thread, since this
-//! whole app is otherwise synchronous) and surface the result in the UI.
+//! Wired into Settings' General tab ("Check for updates", via
+//! `check_for_update_async`, on a background thread since this whole app is
+//! otherwise synchronous).
+//!
+//! Reads `version.json` off the project website rather than hitting
+//! GitHub's API (`.../releases/latest`) directly. GitHub's unauthenticated
+//! REST API is capped at 60 requests/hour *per IP* — shared with everything
+//! else on a user's network — so every install phoning home to it directly
+//! doesn't scale and can start failing for reasons that have nothing to do
+//! with eye-break. `version.json` is a small static file on Vercel's CDN
+//! instead, with no comparable limit; it's kept in sync with the actual
+//! GitHub release by hand on each version bump (see eye-break-website).
+//! The website's own "latest version" display reads the same file, for the
+//! same reason.
 
 use serde::Deserialize;
 use std::time::Duration;
 
-const RELEASES_URL: &str = "https://api.github.com/repos/noorhaq/eye_break/releases/latest";
+const VERSION_URL: &str = "https://eye-break-one.vercel.app/version.json";
 
 #[derive(Deserialize)]
 struct ReleaseResponse {
-    tag_name: String,
+    /// Plain semver, e.g. "0.5.0" (no leading "v") — used for the actual
+    /// version comparison.
+    version: String,
+    /// The matching git tag, e.g. "v0.5.0" — only used for display, so a
+    /// "new version available" message reads the same as the GitHub tag
+    /// a user would go looking for.
+    tag: String,
 }
 
 /// Parses a "major.minor.patch"-ish version string into a comparable tuple.
@@ -33,11 +50,10 @@ fn parse_version(v: &str) -> (u64, u64, u64) {
     )
 }
 
-/// Returns `Some(new_version)` if the latest GitHub release tag is newer
-/// than `current_version`. Returns `None` on any network/parse error, or if
+/// Returns `Some(new_version_tag)` if the latest release is newer than
+/// `current_version`. Returns `None` on any network/parse error, or if
 /// already up to date. Never panics; the underlying HTTP call has a short
 /// timeout so this never blocks for long.
-#[allow(dead_code)]
 pub fn check_for_update(current_version: &str) -> Option<String> {
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(3))
@@ -45,17 +61,17 @@ pub fn check_for_update(current_version: &str) -> Option<String> {
         .build();
 
     let resp = agent
-        .get(RELEASES_URL)
+        .get(VERSION_URL)
         .set("User-Agent", "eye-break-updater")
         .call()
         .ok()?;
 
     let release: ReleaseResponse = resp.into_json().ok()?;
-    let latest = parse_version(&release.tag_name);
+    let latest = parse_version(&release.version);
     let current = parse_version(current_version);
 
     if latest > current {
-        Some(release.tag_name)
+        Some(release.tag)
     } else {
         None
     }
@@ -63,7 +79,6 @@ pub fn check_for_update(current_version: &str) -> Option<String> {
 
 /// Spawns a background thread that performs the update check and calls
 /// `on_result` with the outcome. Never blocks the caller.
-#[allow(dead_code)]
 pub fn check_for_update_async(
     current_version: &'static str,
     on_result: impl FnOnce(Option<String>) + Send + 'static,

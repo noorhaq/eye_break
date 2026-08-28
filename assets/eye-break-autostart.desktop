@@ -2,8 +2,9 @@
 Type=Application
 Name=Eye Break
 Comment=Periodic eye-break reminders with guided exercises
-Exec=/usr/bin/eye-break --open
+Exec=/usr/bin/eye-break
 Icon=eye-break
 Terminal=false
 Categories=Utility;Health;
 StartupNotify=false
+X-GNOME-Autostart-enabled=true

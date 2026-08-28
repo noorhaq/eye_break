@@ -38,7 +38,7 @@ jobs:
           cp target/release/eye-break "$PKG/usr/bin/"
           strip "$PKG/usr/bin/eye-break"
           cp assets/eye-break.desktop "$PKG/usr/share/applications/"
-          cp assets/eye-break.desktop "$PKG/etc/xdg/autostart/"
+          cp assets/eye-break-autostart.desktop "$PKG/etc/xdg/autostart/eye-break.desktop"
           cat > "$PKG/DEBIAN/control" <<EOF
           Package: eye-break
           Version: ${VERSION}-1

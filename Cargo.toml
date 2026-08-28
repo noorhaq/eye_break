@@ -19,7 +19,7 @@ showing a full-screen overlay with a short guided exercise on each break."""
 assets = [
     ["target/release/eye-break", "usr/bin/", "755"],
     ["assets/eye-break.desktop", "usr/share/applications/", "644"],
-    ["assets/eye-break.desktop", "etc/xdg/autostart/", "644"],
+    ["assets/eye-break-autostart.desktop", "etc/xdg/autostart/eye-break.desktop", "644"],
     ["assets/eye-break-16.png", "usr/share/icons/hicolor/16x16/apps/eye-break.png", "644"],
     ["assets/eye-break-32.png", "usr/share/icons/hicolor/32x32/apps/eye-break.png", "644"],
     ["assets/eye-break-48.png", "usr/share/icons/hicolor/48x48/apps/eye-break.png", "644"],

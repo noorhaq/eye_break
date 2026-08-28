@@ -62,6 +62,31 @@ fn main() {
             };
             let _ = settings::run_settings();
         }
+        Some("--open") => {
+            // What the application-menu launcher actually runs (see
+            // assets/eye-break.desktop: Exec=... --open) — distinct from the
+            // separate autostart entry (assets/eye-break-autostart.desktop),
+            // which still launches with no arguments at all and stays
+            // silent. Clicking the app icon should always show *something*,
+            // whether the tray/scheduler happens to be running already
+            // (e.g. autostart got there first) or not — so this makes sure
+            // it's running, then opens Settings (or raises it, if already
+            // open, same as the `--settings` arm above).
+            let exe = std::env::current_exe().unwrap_or_else(|_| "eye-break".into());
+            // A no-op if the tray is already running: the spawned process
+            // just fails its own `singleton::try_acquire("tray")` below and
+            // exits immediately, exactly like a redundant manual launch
+            // always has.
+            let _ = std::process::Command::new(&exe).spawn();
+
+            let Some(_lock) = singleton::try_acquire("settings") else {
+                let _ = std::process::Command::new("wmctrl")
+                    .args(["-a", "Eye Break — Settings"])
+                    .status();
+                return;
+            };
+            let _ = settings::run_settings();
+        }
         Some("enable") => {
             let mut cfg = Config::load();
             cfg.enabled = true;
@@ -153,6 +178,8 @@ fn print_help() {
          \n\
          Usage:\n\
          \x20 eye-break            Run the tray icon + scheduler (default)\n\
+         \x20 eye-break --open     What the app-menu icon launches: starts the tray if it\n\
+         \x20                      isn't running yet, then opens Settings\n\
          \x20 eye-break enable     Enable reminders (works over SSH, no GUI needed)\n\
          \x20 eye-break disable    Disable reminders\n\
          \x20 eye-break toggle     Toggle reminders on/off\n\
