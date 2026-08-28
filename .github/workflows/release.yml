@@ -39,13 +39,27 @@ jobs:
           strip "$PKG/usr/bin/eye-break"
           cp assets/eye-break.desktop "$PKG/usr/share/applications/"
           cp assets/eye-break-autostart.desktop "$PKG/etc/xdg/autostart/eye-break.desktop"
+          # Derive the shared-library dependencies from the binary itself rather
+          # than hand-listing them: tray-icon links libxdo at build time, and a
+          # hand-written list silently dropped it once already (installs fine,
+          # then fails at startup with "libxdo.so.3: cannot open shared object
+          # file"). dpkg-shlibdeps reads the actual DT_NEEDED entries.
+          mkdir -p "$PKG/debian"
+          printf 'Source: eye-break\n' > "$PKG/debian/control"
+          DEPS=$(cd "$PKG" && dpkg-shlibdeps -O --ignore-missing-info usr/bin/eye-break \
+                   | sed -E 's/^shlibs:Depends=//')
+          if [ -z "$DEPS" ]; then
+            echo "dpkg-shlibdeps produced no dependencies" >&2
+            exit 1
+          fi
+          rm -rf "$PKG/debian"
           cat > "$PKG/DEBIAN/control" <<EOF
           Package: eye-break
           Version: ${VERSION}-1
           Section: utils
           Priority: optional
           Architecture: amd64
-          Depends: libgtk-3-0, libx11-6
+          Depends: ${DEPS}
           Recommends: pulseaudio-utils | alsa-utils, xprintidle, x11-utils, xdotool, wmctrl
           Maintainer: Noor ul haq
           Description: Periodic eye-break reminders with guided exercises

@@ -14,6 +14,14 @@ All notable changes to Eye Break are documented here. Format follows
   phase-cycle ordering).
 
 ### Fixed
+- The `.deb` no longer installs an unlaunchable binary. Its `Depends` was
+  hand-written in the release workflow and listed only `libgtk-3-0` and
+  `libx11-6`, omitting `libxdo3` (linked by `tray-icon`); on a machine
+  without `xdotool` already installed the package installed cleanly and
+  then died at startup with `libxdo.so.3: cannot open shared object file`.
+  Dependencies are now derived from the built binary with
+  `dpkg-shlibdeps`. Existing 0.5.0 installs can be fixed with
+  `sudo apt install libxdo3`.
 - Corner-timer opacity (and other Settings changes) no longer silently
   reverts. The tray/scheduler process held its `Config` in memory from
   startup and re-saved that stale copy on every break or menu toggle,
