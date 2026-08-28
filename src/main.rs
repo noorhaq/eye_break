@@ -117,7 +117,8 @@ fn main() {
         Some("status") => {
             let cfg = Config::load();
             let st = state::State::load();
-            let remaining = cfg.enabled.then(|| {
+            let paused = st.is_manually_paused();
+            let remaining = (cfg.enabled && !paused).then(|| {
                 st.next_break_epoch(cfg.interval_secs)
                     .saturating_sub(state::now_epoch())
             });
@@ -125,6 +126,16 @@ fn main() {
                 "enabled: {}\ninterval_secs: {}\ndisplay_secs: {}\nsnooze_secs: {}\nshow_timer: {}",
                 cfg.enabled, cfg.interval_secs, cfg.display_secs, cfg.snooze_secs, cfg.show_timer
             );
+            match st.manual_pause_until_epoch {
+                Some(u) if paused && u == state::MANUAL_PAUSE_INDEFINITE => {
+                    println!("paused: until `eye-break resume` is run");
+                }
+                Some(u) if paused => {
+                    let r = u.saturating_sub(state::now_epoch());
+                    println!("paused: for {}m{}s more", r / 60, r % 60);
+                }
+                _ => println!("paused: no"),
+            }
             if let Some(r) = remaining {
                 println!("next_break_in: {}m{}s", r / 60, r % 60);
             }
@@ -157,6 +168,39 @@ fn main() {
             st.dismiss_token += 1;
             st.save();
             println!("next break pushed out by {}s", cfg.snooze_secs);
+        }
+        Some("pause") => {
+            // A manual, sustained pause for calls/presentations — same
+            // mechanism the tray's "Pause" menu uses. No argument (or
+            // "indefinite") pauses until `eye-break resume` is run; a
+            // number of minutes pauses for exactly that long.
+            let mut st = state::State::load();
+            match args.get(2).map(String::as_str) {
+                None | Some("indefinite") => {
+                    st.start_manual_pause(state::MANUAL_PAUSE_INDEFINITE);
+                    st.save();
+                    println!("eye-break paused until `eye-break resume` is run");
+                }
+                Some(mins_str) => {
+                    let Ok(mins) = mins_str.parse::<u64>() else {
+                        eprintln!("eye-break: expected a number of minutes, got {mins_str:?}");
+                        return;
+                    };
+                    st.start_manual_pause(state::now_epoch() + mins * 60);
+                    st.save();
+                    println!("eye-break paused for {mins} minutes");
+                }
+            }
+        }
+        Some("resume") => {
+            let mut st = state::State::load();
+            if st.is_manually_paused() {
+                st.end_manual_pause();
+                st.save();
+                println!("eye-break resumed");
+            } else {
+                println!("eye-break wasn't paused");
+            }
         }
         Some("--help") | Some("-h") => {
             print_help();
@@ -196,6 +240,9 @@ fn print_help() {
          \x20 eye-break interval <secs>  Set break interval\n\
          \x20 eye-break duration <secs>  Set overlay display duration\n\
          \x20 eye-break snooze <secs>    Set the Skip snooze length\n\
-         \x20 eye-break skip             Push the next break out by the snooze length"
+         \x20 eye-break skip             Push the next break out by the snooze length\n\
+         \x20 eye-break pause [mins]     Pause for calls/presentations — omit mins to\n\
+         \x20                            pause until `resume` is run\n\
+         \x20 eye-break resume           End a manual pause early"
     );
 }

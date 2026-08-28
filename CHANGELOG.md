@@ -7,6 +7,17 @@ All notable changes to Eye Break are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- A manual "Pause" option (tray menu, and `eye-break pause [mins]` /
+  `eye-break resume` over SSH) for calls, presentations, and anything
+  else where reminders shouldn't interrupt — distinct from unchecking
+  "Enabled" (a deliberate, easy-to-forget-to-flip-back-on off switch) and
+  from "Skip" (a one-shot push-out of just the *next* break, which a call
+  running long can outlast). Choose 15/30/60/120 minutes or "Until I
+  resume"; the tray's "Resume now" item shows time remaining and ends the
+  pause early. Like idle detection, returning from a pause (however it
+  ends) resets both schedulers' baselines and clears any pending Skip
+  snooze, so the first break afterward is a full interval away rather than
+  ambushing whoever just got off their call.
 - `README.md` with installation (`.deb`, macOS zip, from-source), CLI, and
   config-file-location documentation.
 - Licensed under GPL-3.0-or-later.

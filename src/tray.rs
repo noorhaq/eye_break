@@ -4,7 +4,7 @@ use crate::exercises;
 use crate::idle;
 use crate::monitors::list_monitors;
 use crate::pomodoro::{self, PomodoroState};
-use crate::state::{now_epoch, State};
+use crate::state::{now_epoch, State, MANUAL_PAUSE_INDEFINITE};
 use crate::stats::{self, UsageLog};
 use std::cell::RefCell;
 use std::process::Child;
@@ -15,6 +15,23 @@ use tray_icon::{TrayIconBuilder, TrayIconEvent};
 const DURATION_CHOICES_SECS: &[u64] = &[5, 10, 15, 20, 30, 45, 60];
 const INTERVAL_CHOICES_MIN: &[u64] = &[10, 15, 20, 30, 45, 60];
 const SNOOZE_CHOICES_MIN: &[u64] = &[5, 10, 15, 20];
+/// Minutes offered in the tray's "Pause" submenu — for calls, presentations,
+/// anything longer than the one-shot Skip snooze is meant to cover.
+const PAUSE_CHOICES_MIN: &[(&str, u64)] =
+    &[("15 minutes", 15), ("30 minutes", 30), ("1 hour", 60), ("2 hours", 120)];
+
+/// Resets the Pomodoro scheduler's baseline to "now" — called alongside
+/// `State`'s own baseline reset (which `start_manual_pause`/
+/// `end_manual_pause` already handle) whenever a manual pause starts, ends,
+/// or naturally expires. Same reason idle detection's idle -> active
+/// transition does this (see that comment below): otherwise a Pomodoro
+/// phase that finished while paused sits overdue and fires the instant the
+/// pause lifts, ambushing whoever just got off their call.
+fn reset_pomodoro_baseline(pomodoro_state: &RefCell<PomodoroState>) {
+    let mut pstate = pomodoro_state.borrow_mut();
+    pstate.phase_started_epoch = now_epoch();
+    pstate.save();
+}
 
 fn build_icon() -> tray_icon::Icon {
     // Simple procedurally-drawn eye glyph: a light circle (iris) on transparent bg.
@@ -143,6 +160,23 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
         snooze_items.push((item, min * 60));
     }
 
+    // "Pause" submenu: a manual, sustained pause for calls/presentations —
+    // distinct from unchecking "Enabled" (a deliberate off switch easy to
+    // forget to flip back) and from "Skip" (a one-shot push-out of just the
+    // *next* break, which a call running long can outlast).
+    let pause_menu = Submenu::new("Pause", true);
+    let mut pause_items = Vec::new();
+    for &(label, mins) in PAUSE_CHOICES_MIN {
+        let item = MenuItem::new(label, true, None);
+        pause_menu.append(&item).unwrap();
+        pause_items.push((item, mins * 60));
+    }
+    pause_menu.append(&PredefinedMenuItem::separator()).unwrap();
+    let pause_indefinite_item = MenuItem::new("Until I resume", true, None);
+    pause_menu.append(&pause_indefinite_item).unwrap();
+
+    let resume_item = MenuItem::new("Resume now", false, None);
+
     let break_now_item = MenuItem::new("Take a break now", true, None);
     let skip_item = MenuItem::new("Skip next break (snooze)", true, None);
     let settings_item = MenuItem::new("Settings…", true, None);
@@ -150,6 +184,9 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
 
     menu.append(&toggle_item).unwrap();
     menu.append(&timer_item).unwrap();
+    menu.append(&PredefinedMenuItem::separator()).unwrap();
+    menu.append(&pause_menu).unwrap();
+    menu.append(&resume_item).unwrap();
     menu.append(&PredefinedMenuItem::separator()).unwrap();
     menu.append(&interval_menu).unwrap();
     menu.append(&duration_menu).unwrap();
@@ -168,6 +205,12 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
     let skip_id = skip_item.id().clone();
     let settings_id = settings_item.id().clone();
     let quit_id = quit_item.id().clone();
+    let pause_indefinite_id = pause_indefinite_item.id().clone();
+    let resume_id = resume_item.id().clone();
+    let pause_ids: Vec<_> = pause_items
+        .iter()
+        .map(|(item, secs)| (item.id().clone(), *secs))
+        .collect();
     let interval_ids: Vec<_> = interval_items
         .iter()
         .map(|(item, secs)| (item.id().clone(), *secs))
@@ -208,6 +251,7 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
     let mut cached_is_idle = false;
     let mut cached_is_fullscreen = false;
     let mut was_idle = false;
+    let mut was_manually_paused = false;
 
     move || {
         // Keep the tray icon alive for as long as this closure (and thus the
@@ -253,6 +297,26 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
                 st.dismiss_token += 1;
                 st.save();
                 println!("[eye-break] next break snoozed by {}s", cfg.snooze_secs);
+            } else if event.id == pause_indefinite_id {
+                let mut st = State::load();
+                st.start_manual_pause(MANUAL_PAUSE_INDEFINITE);
+                st.save();
+                reset_pomodoro_baseline(&pomodoro_state);
+                println!("[eye-break] paused until resumed");
+            } else if event.id == resume_id {
+                let mut st = State::load();
+                if st.is_manually_paused() {
+                    st.end_manual_pause();
+                    st.save();
+                    reset_pomodoro_baseline(&pomodoro_state);
+                    println!("[eye-break] resumed");
+                }
+            } else if let Some((_, secs)) = pause_ids.iter().find(|(id, _)| *id == event.id) {
+                let mut st = State::load();
+                st.start_manual_pause(now_epoch() + secs);
+                st.save();
+                reset_pomodoro_baseline(&pomodoro_state);
+                println!("[eye-break] paused for {}min", secs / 60);
             } else if event.id == settings_id {
                 let _ = std::process::Command::new(&exe_tick).arg("--settings").spawn();
             } else if event.id == quit_id {
@@ -326,13 +390,42 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
         } else if was_idle {
             was_idle = false;
             let mut st = State::load();
-            st.last_break_epoch = now_epoch();
+            st.reset_schedule_baseline();
             st.save();
-
-            let mut pstate = pomodoro_state.borrow_mut();
-            pstate.phase_started_epoch = now_epoch();
-            pstate.save();
+            reset_pomodoro_baseline(&pomodoro_state);
         }
+
+        // Same ambush, same fix, for a manual pause reaching its own end
+        // time with nobody around to click "Resume now" — Pause and Resume
+        // both already reset the baselines themselves at the moment
+        // they're clicked (see `start_manual_pause`/`end_manual_pause`),
+        // but a *timed* pause (say, 30 minutes for a call) can simply run
+        // out with no click at all, so that transition needs catching here
+        // too, exactly like idle's.
+        let mut st_now = State::load();
+        let is_manually_paused_now = st_now.is_manually_paused();
+        if is_manually_paused_now {
+            was_manually_paused = true;
+        } else if was_manually_paused {
+            was_manually_paused = false;
+            st_now.end_manual_pause();
+            st_now.save();
+            reset_pomodoro_baseline(&pomodoro_state);
+        }
+
+        // Keep "Resume now" reflecting reality — greyed out unless a pause
+        // is actually in effect, labeled with how long is left (or that
+        // there's no set end time, for "Until I resume").
+        resume_item.set_enabled(is_manually_paused_now);
+        resume_item.set_text(match st_now.manual_pause_until_epoch {
+            Some(_) if !is_manually_paused_now => "Resume now".to_string(),
+            Some(MANUAL_PAUSE_INDEFINITE) => "Resume now (paused)".to_string(),
+            Some(u) => {
+                let remaining = u.saturating_sub(now_epoch());
+                format!("Resume now ({}m{}s left)", remaining / 60, remaining % 60)
+            }
+            None => "Resume now".to_string(),
+        });
 
         // Usage-stats: this tick fires every 500ms, so accumulate a whole
         // second every other tick (rather than double-counting by recording
@@ -359,12 +452,13 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
                 || !config::is_within_workday(&cfg)
                 || cached_is_idle
                 || cached_is_fullscreen
+                || is_manually_paused_now
             {
                 false
             } else if cfg.pomodoro_enabled {
                 pomodoro::pomodoro_due(&mut pomodoro_state.borrow_mut(), &cfg)
             } else {
-                now_epoch() >= State::load().next_break_epoch(cfg.interval_secs)
+                now_epoch() >= st_now.next_break_epoch(cfg.interval_secs)
             }
         };
         if due {

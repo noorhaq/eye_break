@@ -114,7 +114,8 @@ impl eframe::App for TimerApp {
                 let ring_center = rect.left_center() + egui::vec2(30.0, 0.0);
                 let ring_r = 17.0;
 
-                if !self.cfg.enabled {
+                let manually_paused = self.state.is_manually_paused();
+                if !self.cfg.enabled || manually_paused {
                     painter.circle_stroke(
                         ring_center,
                         ring_r,
@@ -127,10 +128,26 @@ impl eframe::App for TimerApp {
                         egui::FontId::proportional(13.0),
                         faded(design::neutral_600(), op),
                     );
+                    // Distinguish a deliberate, remembered-forever "Enabled"
+                    // off switch from a manual pause (for a call, say),
+                    // which is meant to be temporary and shows how long is
+                    // left as a reminder it'll come back on its own.
+                    let label = if !self.cfg.enabled {
+                        "Eye Break paused".to_string()
+                    } else if self.state.manual_pause_until_epoch == Some(crate::state::MANUAL_PAUSE_INDEFINITE) {
+                        "Paused until resumed".to_string()
+                    } else {
+                        let r = self
+                            .state
+                            .manual_pause_until_epoch
+                            .unwrap_or(0)
+                            .saturating_sub(now_epoch());
+                        format!("Paused — back in {:02}:{:02}", r / 60, r % 60)
+                    };
                     painter.text(
                         rect.left_center() + egui::vec2(56.0, 0.0),
                         egui::Align2::LEFT_CENTER,
-                        "Eye Break paused",
+                        label,
                         design::heading_font(15.0),
                         faded(design::text(), op),
                     );
