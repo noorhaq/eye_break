@@ -6,6 +6,7 @@ mod exercises;
 mod idle;
 mod monitors;
 mod overlay;
+mod paths;
 mod pomodoro;
 mod raise;
 mod settings;

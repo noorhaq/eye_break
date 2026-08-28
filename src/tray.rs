@@ -454,7 +454,7 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
         // 1s on every 500ms tick), and flush to disk every ~10s to keep disk
         // writes light. Skipped while idle so "usage" reflects active time.
         usage_save_countdown += 1;
-        if usage_save_countdown % 2 == 0 && !cached_is_idle {
+        if usage_save_countdown.is_multiple_of(2) && !cached_is_idle {
             stats::record_tick(&mut usage_log.borrow_mut(), 1);
         }
         if usage_save_countdown >= 20 {

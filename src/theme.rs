@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 /// Visual theme applied to eye-break's egui windows (overlay, corner timer).
 /// Self-contained: `apply` is the only entry point other modules need.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum Theme {
+    #[default]
     Dark,
     Light,
     Solarized,
@@ -12,11 +14,6 @@ pub enum Theme {
     Nord,
 }
 
-impl Default for Theme {
-    fn default() -> Self {
-        Theme::Dark
-    }
-}
 
 impl Theme {
     /// All available themes, in the order they should be presented in a UI.

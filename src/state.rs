@@ -52,11 +52,7 @@ pub fn now_epoch() -> u64 {
 }
 
 fn state_path() -> PathBuf {
-    let dirs = directories::ProjectDirs::from("dev", "eye-break", "eye-break")
-        .expect("could not determine config dir");
-    let dir = dirs.config_dir();
-    std::fs::create_dir_all(dir).ok();
-    dir.join("state.json")
+    crate::paths::config_file("state.json")
 }
 
 impl State {

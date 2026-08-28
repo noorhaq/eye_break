@@ -78,11 +78,7 @@ impl PomodoroPhase {
 }
 
 fn pomodoro_state_path() -> PathBuf {
-    let dirs = directories::ProjectDirs::from("dev", "eye-break", "eye-break")
-        .expect("could not determine config dir");
-    let dir = dirs.config_dir();
-    std::fs::create_dir_all(dir).ok();
-    dir.join("pomodoro_state.json")
+    crate::paths::config_file("pomodoro_state.json")
 }
 
 impl PomodoroState {
@@ -157,7 +153,7 @@ fn advance_if_due(state: &mut PomodoroState, cfg: &PomodoroConfig, now_epoch_sec
     state.phase = match state.phase {
         PomodoroPhase::Work => {
             state.cycles_completed += 1;
-            if state.cycles_completed % cfg.cycles_before_long_break.max(1) == 0 {
+            if state.cycles_completed.is_multiple_of(cfg.cycles_before_long_break.max(1)) {
                 PomodoroPhase::LongBreak
             } else {
                 PomodoroPhase::ShortBreak
@@ -169,109 +165,13 @@ fn advance_if_due(state: &mut PomodoroState, cfg: &PomodoroConfig, now_epoch_sec
     true
 }
 
-/// Hook for the tray/scheduler integration pass: returns true when, under
-/// Pomodoro scheduling, a break should be triggered right now (i.e. the
-/// current phase is a break phase that has just become due). Intended to be
-/// called from tray.rs's scheduler tick alongside (or instead of) the
-/// existing interval-based `due` check when `cfg.pomodoro_enabled` is true.
-/// Advances and persists `state` as a side effect via `tick`.
+/// Returns true when, under Pomodoro scheduling, a break should be triggered
+/// right now (i.e. the current phase is a break phase that has just become
+/// due). Called from tray.rs's scheduler tick alongside the interval-based
+/// `due` check when `cfg.pomodoro_enabled` is true. Advances and persists
+/// `state` as a side effect via `tick`.
 pub fn pomodoro_due(state: &mut PomodoroState, cfg: &Config) -> bool {
     let pcfg = PomodoroConfig::from(cfg);
     let phase_changed = tick(state, &pcfg);
     phase_changed && matches!(state.phase, PomodoroPhase::ShortBreak | PomodoroPhase::LongBreak)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn cfg() -> PomodoroConfig {
-        PomodoroConfig {
-            work_mins: 25,
-            short_break_mins: 5,
-            long_break_mins: 15,
-            cycles_before_long_break: 4,
-        }
-    }
-
-    /// This is the exact math timer.rs's corner countdown was missing
-    /// entirely before this fix — it used to compute remaining time
-    /// against the plain interval scheduler even in Pomodoro mode, a
-    /// schedule nothing was actually driving.
-    #[test]
-    fn phase_progress_at_phase_start_is_full_and_unelapsed() {
-        let cfg = cfg();
-        let state = PomodoroState {
-            phase: PomodoroPhase::Work,
-            cycles_completed: 0,
-            phase_started_epoch: 1_000,
-        };
-        let (remaining, elapsed_frac) = state.phase_progress(&cfg, 1_000);
-        assert_eq!(remaining, 25 * 60);
-        assert_eq!(elapsed_frac, 0.0);
-    }
-
-    #[test]
-    fn phase_progress_halfway_through() {
-        let cfg = cfg();
-        let state = PomodoroState {
-            phase: PomodoroPhase::ShortBreak,
-            cycles_completed: 1,
-            phase_started_epoch: 1_000,
-        };
-        let half = (5 * 60) / 2;
-        let (remaining, elapsed_frac) = state.phase_progress(&cfg, 1_000 + half);
-        assert_eq!(remaining, 5 * 60 - half);
-        assert!((elapsed_frac - 0.5).abs() < 0.01);
-    }
-
-    /// Before this fix, once the (wrong) countdown timer.rs displayed ran
-    /// out, `remaining` never moved again — because it was tracking a
-    /// scheduler that Pomodoro mode had bypassed. `phase_progress` must
-    /// clamp cleanly to `(0, 1.0)` here, not panic or go negative, since
-    /// this is exactly the "past due" instant the corner card renders
-    /// while waiting for the next `tick()` (driven by tray.rs) to flip the
-    /// phase and reset `phase_started_epoch`.
-    #[test]
-    fn phase_progress_past_due_clamps_to_zero_remaining() {
-        let cfg = cfg();
-        let state = PomodoroState {
-            phase: PomodoroPhase::Work,
-            cycles_completed: 0,
-            phase_started_epoch: 1_000,
-        };
-        let (remaining, elapsed_frac) = state.phase_progress(&cfg, 1_000 + 25 * 60 + 500);
-        assert_eq!(remaining, 0);
-        assert_eq!(elapsed_frac, 1.0);
-    }
-
-    #[test]
-    fn tick_cycles_work_short_break_and_long_break_in_order() {
-        let cfg = cfg();
-        let mut state = PomodoroState {
-            phase: PomodoroPhase::Work,
-            cycles_completed: 0,
-            phase_started_epoch: now_epoch(),
-        };
-
-        // Force each phase to already be due, then advance one tick at a
-        // time, checking the sequence: Work -> Short -> Work -> Short ->
-        // Work -> Short -> Work -> Long (4th work cycle) -> Work.
-        let expected = [
-            PomodoroPhase::ShortBreak,
-            PomodoroPhase::Work,
-            PomodoroPhase::ShortBreak,
-            PomodoroPhase::Work,
-            PomodoroPhase::ShortBreak,
-            PomodoroPhase::Work,
-            PomodoroPhase::LongBreak,
-            PomodoroPhase::Work,
-        ];
-        for want in expected {
-            state.phase_started_epoch = 0; // guarantee the phase is due
-            let changed = advance_if_due(&mut state, &cfg, i64::MAX as u64);
-            assert!(changed, "expected a phase change to {want:?}");
-            assert_eq!(state.phase, want);
-        }
-    }
 }

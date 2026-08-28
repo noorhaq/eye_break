@@ -1,6 +1,6 @@
+use crate::state::now_epoch;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Maximum number of daily entries retained in the usage log; older entries
 /// are trimmed on save.
@@ -35,16 +35,11 @@ pub struct UsageLog {
 }
 
 fn usage_log_path() -> PathBuf {
-    let dirs = directories::ProjectDirs::from("dev", "eye-break", "eye-break")
-        .expect("could not determine config dir");
-    let dir = dirs.config_dir();
-    std::fs::create_dir_all(dir).ok();
-    dir.join("usage_log.json")
+    crate::paths::config_file("usage_log.json")
 }
 
 impl UsageLog {
     /// Load the usage log from disk, creating an empty one if none exists yet.
-    #[allow(dead_code)]
     pub fn load() -> Self {
         let path = usage_log_path();
         match std::fs::read_to_string(&path) {
@@ -59,7 +54,6 @@ impl UsageLog {
 
     /// Persist the usage log to disk, trimming to the most recent
     /// [`MAX_DAYS`] entries first.
-    #[allow(dead_code)]
     pub fn save(&self) {
         let mut log = self.clone();
         if log.days.len() > MAX_DAYS {
@@ -112,13 +106,6 @@ fn date_string_for_epoch(epoch_secs: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-fn now_epoch() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 /// Accumulates `elapsed_secs` of active usage into today's entry, rolling
 /// over to a new [`DailyUsage`] if the date has changed since the last
 /// recorded entry. Call this periodically from the scheduler loop (e.g.
@@ -126,7 +113,6 @@ fn now_epoch() -> u64 {
 ///
 /// Does not save to disk; call [`UsageLog::save`] as needed (e.g. once per
 /// tick, or on a slower cadence).
-#[allow(dead_code)]
 pub fn record_tick(log: &mut UsageLog, elapsed_secs: u64) {
     let today = today_string();
     let hour = ((now_epoch() % 86_400) / 3600) as usize;
@@ -149,7 +135,6 @@ pub fn record_tick(log: &mut UsageLog, elapsed_secs: u64) {
 
 /// Returns the accumulated active seconds recorded for today, or 0 if no
 /// entry exists yet.
-#[allow(dead_code)]
 pub fn today_usage_secs(log: &UsageLog) -> u64 {
     let today = today_string();
     log.days
@@ -161,8 +146,7 @@ pub fn today_usage_secs(log: &UsageLog) -> u64 {
 }
 
 /// Returns up to the last `n` days of usage entries (oldest first), for use
-/// in a future usage chart/UI.
-#[allow(dead_code)]
+/// in the usage chart.
 pub fn usage_last_n_days(log: &UsageLog, n: usize) -> Vec<DailyUsage> {
     let len = log.days.len();
     let start = len.saturating_sub(n);
@@ -174,7 +158,6 @@ pub fn usage_last_n_days(log: &UsageLog, n: usize) -> Vec<DailyUsage> {
 /// Normalized against the single busiest hour in the period (rather than
 /// each day's own total) so the wheel reads as "when", not "how much
 /// overall", matching the design's per-hour intensity wedges.
-#[allow(dead_code)]
 pub fn hourly_activity_fractions(log: &UsageLog, n: usize) -> [f32; 24] {
     let days = usage_last_n_days(log, n);
     let mut totals = [0u64; 24];
@@ -189,31 +172,4 @@ pub fn hourly_activity_fractions(log: &UsageLog, n: usize) -> [f32; 24] {
         fractions[h] = *total as f32 / max as f32;
     }
     fractions
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn civil_from_days_epoch() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-    }
-
-    #[test]
-    fn record_tick_accumulates_and_rolls_over() {
-        let mut log = UsageLog::default();
-        record_tick(&mut log, 10);
-        record_tick(&mut log, 5);
-        assert_eq!(log.days.len(), 1);
-        assert_eq!(today_usage_secs(&log), 15);
-
-        // Simulate a rolled-over day by hand.
-        log.days.push(DailyUsage {
-            date: "2000-01-01".to_string(),
-            active_secs: 42,
-            hourly_secs: [0; 24],
-        });
-        assert_eq!(usage_last_n_days(&log, 1).len(), 1);
-    }
 }

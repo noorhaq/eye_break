@@ -172,11 +172,7 @@ impl Default for Config {
 }
 
 fn config_path() -> PathBuf {
-    let dirs = directories::ProjectDirs::from("dev", "eye-break", "eye-break")
-        .expect("could not determine config dir");
-    let dir = dirs.config_dir();
-    std::fs::create_dir_all(dir).ok();
-    dir.join("config.json")
+    crate::paths::config_file("config.json")
 }
 
 impl Config {
@@ -204,15 +200,12 @@ impl Config {
 /// schedule (`workday_start_hour`..`workday_end_hour`, on a
 /// `workday_days`-enabled weekday). Always returns `true` when
 /// `workday_enabled` is false, matching the original always-on behavior.
-///
-/// Intended for the tray/scheduler integration step to call before
-/// triggering a break.
+/// Called from tray.rs's scheduler tick before triggering a break.
 ///
 /// Note: time-of-day and weekday are computed from UTC (no timezone crate
 /// dependency), so on machines far from UTC this may not line up with local
 /// wall-clock hours. Good enough as a first pass; revisit if precise local
 /// time is needed.
-#[allow(dead_code)]
 pub fn is_within_workday(cfg: &Config) -> bool {
     if !cfg.workday_enabled {
         return true;

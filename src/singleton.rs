@@ -23,11 +23,7 @@ pub struct InstanceLock {
 }
 
 fn lock_path(kind: &str) -> PathBuf {
-    let dirs = directories::ProjectDirs::from("dev", "eye-break", "eye-break")
-        .expect("could not determine config dir");
-    let dir = dirs.config_dir();
-    std::fs::create_dir_all(dir).ok();
-    dir.join(format!("{kind}.lock"))
+    crate::paths::config_file(&format!("{kind}.lock"))
 }
 
 /// Tries to become the sole instance of `kind`. Returns `Some(lock)` if this
@@ -39,6 +35,7 @@ pub fn try_acquire(kind: &str) -> Option<InstanceLock> {
     let path = lock_path(kind);
     let file = std::fs::OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(path)
         .ok()?;

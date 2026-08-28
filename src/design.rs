@@ -68,7 +68,7 @@ const CLASSICAL: Palette = Palette {
 thread_local! {
     /// The active window's resolved palette for the current frame. Set by
     /// `apply()`; stays at `CLASSICAL` for any window that never calls it.
-    static PALETTE: Cell<Palette> = Cell::new(CLASSICAL);
+    static PALETTE: Cell<Palette> = const { Cell::new(CLASSICAL) };
 }
 
 pub fn bg() -> egui::Color32 { PALETTE.with(|p| p.get().bg) }
@@ -76,8 +76,6 @@ pub fn surface() -> egui::Color32 { PALETTE.with(|p| p.get().surface) }
 pub fn text() -> egui::Color32 { PALETTE.with(|p| p.get().text) }
 pub fn accent() -> egui::Color32 { PALETTE.with(|p| p.get().accent) }
 pub fn accent_100() -> egui::Color32 { PALETTE.with(|p| p.get().accent_100) }
-#[allow(dead_code)] // kept for API symmetry with the rest of the accent ramp
-pub fn accent_300() -> egui::Color32 { PALETTE.with(|p| p.get().accent_300) }
 pub fn accent_500() -> egui::Color32 { PALETTE.with(|p| p.get().accent_500) }
 pub fn accent_700() -> egui::Color32 { PALETTE.with(|p| p.get().accent_700) }
 pub fn accent_800() -> egui::Color32 { PALETTE.with(|p| p.get().accent_800) }

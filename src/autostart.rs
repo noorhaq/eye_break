@@ -3,9 +3,8 @@
 //! The `.deb` package already ships a `/etc/xdg/autostart/eye-break.desktop`
 //! entry, so this module is only relevant to users running the raw binary
 //! directly. It is **not** part of `Config` — it's a live filesystem
-//! check/toggle, not a persisted setting, and a future tray menu item is
-//! expected to call `is_enabled`/`set_enabled` directly rather than reading
-//! it from config.
+//! check/toggle, not a persisted setting; the settings UI calls
+//! `is_enabled`/`set_enabled` directly rather than reading it from config.
 
 use std::io;
 use std::path::PathBuf;
@@ -35,13 +34,11 @@ fn autostart_file() -> Option<PathBuf> {
 }
 
 /// Whether a user-level autostart entry currently exists.
-#[allow(dead_code)]
 pub fn is_enabled() -> bool {
     autostart_file().map(|p| p.exists()).unwrap_or(false)
 }
 
 /// Create or remove `~/.config/autostart/eye-break.desktop`.
-#[allow(dead_code)]
 pub fn set_enabled(enabled: bool) -> io::Result<()> {
     let path = autostart_file().ok_or_else(|| {
         io::Error::new(io::ErrorKind::NotFound, "could not determine home directory")

@@ -2,10 +2,12 @@ use serde::{Deserialize, Serialize};
 
 /// Which notification sound to play when a break overlay is triggered.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Default)]
 pub enum SoundChoice {
     /// No sound.
     None,
     /// Built-in short chime.
+    #[default]
     Chime,
     /// Built-in short bell.
     Bell,
@@ -13,11 +15,6 @@ pub enum SoundChoice {
     Custom(String),
 }
 
-impl Default for SoundChoice {
-    fn default() -> Self {
-        SoundChoice::Chime
-    }
-}
 
 const CHIME_WAV: &[u8] = include_bytes!("../assets/sounds/chime.wav");
 const BELL_WAV: &[u8] = include_bytes!("../assets/sounds/bell.wav");
