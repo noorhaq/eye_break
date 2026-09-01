@@ -18,6 +18,7 @@ pub fn run_overlay(
     display_secs: f32,
     exercise_index: usize,
     original_focus: Option<String>,
+    is_long_break: bool,
 ) -> eframe::Result<()> {
     raise::keep_on_top_in_background(original_focus);
 
@@ -46,7 +47,9 @@ pub fn run_overlay(
     eframe::run_native(
         "eye-break-overlay",
         options,
-        Box::new(move |_cc| Ok(Box::new(OverlayApp::new(rect, display_secs, exercise_index)))),
+        Box::new(move |_cc| {
+            Ok(Box::new(OverlayApp::new(rect, display_secs, exercise_index, is_long_break)))
+        }),
     )
 }
 
@@ -56,6 +59,12 @@ struct OverlayApp {
     display_secs: f32,
     exercise: &'static Exercise,
     reminder_text: String,
+    is_long_break: bool,
+    // Loaded once at startup, same as `reminder_text` — a break already in
+    // progress keeps whatever mode it started in even if Settings changes
+    // strict mode mid-break, which is simpler to reason about than a break
+    // that suddenly grows or loses its buttons partway through.
+    strict_mode: bool,
     my_dismiss_token: u64,
     last_state_poll: Instant,
     last_mouse_poll: Instant,
@@ -64,14 +73,17 @@ struct OverlayApp {
 }
 
 impl OverlayApp {
-    fn new(rect: MonitorRect, display_secs: f32, exercise_index: usize) -> Self {
+    fn new(rect: MonitorRect, display_secs: f32, exercise_index: usize, is_long_break: bool) -> Self {
         let my_dismiss_token = State::load().dismiss_token;
+        let cfg = Config::load();
         Self {
             rect,
             start: Instant::now(),
             display_secs,
             exercise: exercises::get(exercise_index),
-            reminder_text: Config::load().reminder_text,
+            reminder_text: cfg.reminder_text,
+            is_long_break,
+            strict_mode: cfg.strict_mode,
             my_dismiss_token,
             last_state_poll: Instant::now(),
             last_mouse_poll: Instant::now() - Duration::from_millis(MOUSE_POLL_MS),
@@ -215,6 +227,16 @@ impl eframe::App for OverlayApp {
                 let line_count = self.exercise.lines.len() as f32;
                 let body_top = center.y - 10.0 - (line_count - 1.0) * 14.0;
 
+                if self.is_long_break {
+                    ui.painter().text(
+                        egui::pos2(center.x, center.y - 168.0),
+                        egui::Align2::CENTER_CENTER,
+                        "LONG BREAK",
+                        egui::FontId::proportional(13.0),
+                        egui::Color32::from_rgba_unmultiplied(255, 210, 120, (200.0 * alpha) as u8),
+                    );
+                }
+
                 ui.painter().text(
                     egui::pos2(center.x, center.y - 140.0),
                     egui::Align2::CENTER_CENTER,
@@ -254,74 +276,90 @@ impl eframe::App for OverlayApp {
                     egui::Color32::from_rgba_unmultiplied(180, 180, 180, (255.0 * alpha) as u8),
                 );
 
-                // Two buttons side by side, centered near the bottom: "OK,
-                // I'm done" dismisses right now with no effect on the next
-                // break's schedule; "Skip" also dismisses now but pushes the
-                // next break out by the snooze length.
-                let ok_size = egui::vec2(180.0, 40.0);
-                let skip_size = egui::vec2(230.0, 40.0);
-                let gap = 12.0;
-                let total_w = ok_size.x + gap + skip_size.x;
-                let row_y = screen.bottom() - 70.0;
-                let ok_rect = egui::Rect::from_center_size(
-                    egui::pos2(center.x - total_w / 2.0 + ok_size.x / 2.0, row_y),
-                    ok_size,
-                );
-                let skip_rect = egui::Rect::from_center_size(
-                    egui::pos2(center.x + total_w / 2.0 - skip_size.x / 2.0, row_y),
-                    skip_size,
-                );
-                // A little slack around the visible button bounds so the
-                // passthrough toggle (driven by a throttled, external mouse
-                // poll rather than egui's own now-blind pointer tracking)
-                // engages a beat before the cursor is exactly on the edge.
-                hit_rects.push(ok_rect.expand(6.0));
-                hit_rects.push(skip_rect.expand(6.0));
+                if self.strict_mode {
+                    // No way out early — this break runs for the full
+                    // `display_secs`/`long_break_display_secs` no matter
+                    // what. Say so, in place of the buttons, rather than
+                    // just silently not offering them.
+                    ui.painter().text(
+                        egui::pos2(center.x, screen.bottom() - 60.0),
+                        egui::Align2::CENTER_CENTER,
+                        "Strict mode — this break can't be skipped",
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::from_rgba_unmultiplied(180, 180, 180, (200.0 * alpha) as u8),
+                    );
+                } else {
+                    // Two buttons side by side, centered near the bottom:
+                    // "OK, I'm done" dismisses right now with no effect on
+                    // the next break's schedule; "Skip" also dismisses now
+                    // but pushes the next break out by the snooze length.
+                    let ok_size = egui::vec2(180.0, 40.0);
+                    let skip_size = egui::vec2(230.0, 40.0);
+                    let gap = 12.0;
+                    let total_w = ok_size.x + gap + skip_size.x;
+                    let row_y = screen.bottom() - 70.0;
+                    let ok_rect = egui::Rect::from_center_size(
+                        egui::pos2(center.x - total_w / 2.0 + ok_size.x / 2.0, row_y),
+                        ok_size,
+                    );
+                    let skip_rect = egui::Rect::from_center_size(
+                        egui::pos2(center.x + total_w / 2.0 - skip_size.x / 2.0, row_y),
+                        skip_size,
+                    );
+                    // A little slack around the visible button bounds so the
+                    // passthrough toggle (driven by a throttled, external
+                    // mouse poll rather than egui's own now-blind pointer
+                    // tracking) engages a beat before the cursor is exactly
+                    // on the edge.
+                    hit_rects.push(ok_rect.expand(6.0));
+                    hit_rects.push(skip_rect.expand(6.0));
 
-                let text_alpha = (255.0 * alpha) as u8;
-                let make_button = |label: String, fill: u8| {
-                    egui::Button::new(
-                        egui::RichText::new(label)
-                            .size(16.0)
-                            .color(egui::Color32::from_rgba_unmultiplied(
-                                255, 255, 255, text_alpha,
-                            )),
-                    )
-                    .fill(egui::Color32::from_rgba_unmultiplied(
-                        255,
-                        255,
-                        255,
-                        (fill as f32 * alpha) as u8,
-                    ))
-                    .stroke(egui::Stroke::new(
-                        1.0_f32,
-                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, (120.0 * alpha) as u8),
-                    ))
-                    .rounding(8.0)
-                };
+                    let text_alpha = (255.0 * alpha) as u8;
+                    let make_button = |label: String, fill: u8| {
+                        egui::Button::new(
+                            egui::RichText::new(label)
+                                .size(16.0)
+                                .color(egui::Color32::from_rgba_unmultiplied(
+                                    255, 255, 255, text_alpha,
+                                )),
+                        )
+                        .fill(egui::Color32::from_rgba_unmultiplied(
+                            255,
+                            255,
+                            255,
+                            (fill as f32 * alpha) as u8,
+                        ))
+                        .stroke(egui::Stroke::new(
+                            1.0_f32,
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, (120.0 * alpha) as u8),
+                        ))
+                        .rounding(8.0)
+                    };
 
-                // "OK" is the primary action — filled brighter so it reads as
-                // the default choice for someone who just wants to move on.
-                if ui
-                    .put(ok_rect, make_button("OK, I'm done".to_string(), 70))
-                    .clicked()
-                {
-                    self.acknowledge();
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    std::process::exit(0);
-                }
+                    // "OK" is the primary action — filled brighter so it
+                    // reads as the default choice for someone who just wants
+                    // to move on.
+                    if ui
+                        .put(ok_rect, make_button("OK, I'm done".to_string(), 70))
+                        .clicked()
+                    {
+                        self.acknowledge();
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        std::process::exit(0);
+                    }
 
-                let snooze_min = Config::load().snooze_secs / 60;
-                if ui
-                    .put(
-                        skip_rect,
-                        make_button(format!("Skip — remind me in {snooze_min} min"), 30),
-                    )
-                    .clicked()
-                {
-                    self.skip();
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    std::process::exit(0);
+                    let snooze_min = Config::load().snooze_secs / 60;
+                    if ui
+                        .put(
+                            skip_rect,
+                            make_button(format!("Skip — remind me in {snooze_min} min"), 30),
+                        )
+                        .clicked()
+                    {
+                        self.skip();
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        std::process::exit(0);
+                    }
                 }
             });
 

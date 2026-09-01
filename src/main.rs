@@ -42,11 +42,17 @@ fn main() {
             // overlay window instead of whatever the user was actually
             // using. Empty string means the tray couldn't determine one.
             let original_focus = args.get(8).filter(|s| !s.is_empty()).cloned();
+            // Whether this is a tiered-breaks "long break" rather than a
+            // regular one — see tray.rs's trigger_break, which is the only
+            // caller and always passes this explicitly ("0" for every
+            // break that isn't a long break, including all Pomodoro ones).
+            let is_long_break = args.get(9).map(String::as_str) == Some("1");
             let _ = overlay::run_overlay(
                 monitors::MonitorRect { x, y, w, h, primary: false },
                 display_secs,
                 exercise_index,
                 original_focus,
+                is_long_break,
             );
         }
         Some("--timer") => {
@@ -120,8 +126,9 @@ fn main() {
             let st = state::State::load();
             let paused = st.is_manually_paused();
             println!(
-                "enabled: {}\ninterval_secs: {}\ndisplay_secs: {}\nsnooze_secs: {}\nshow_timer: {}\npomodoro_enabled: {}",
-                cfg.enabled, cfg.interval_secs, cfg.display_secs, cfg.snooze_secs, cfg.show_timer, cfg.pomodoro_enabled
+                "enabled: {}\ninterval_secs: {}\ndisplay_secs: {}\nsnooze_secs: {}\nshow_timer: {}\npomodoro_enabled: {}\nstrict_mode: {}\ntiered_breaks_enabled: {}",
+                cfg.enabled, cfg.interval_secs, cfg.display_secs, cfg.snooze_secs, cfg.show_timer, cfg.pomodoro_enabled,
+                cfg.strict_mode, cfg.tiered_breaks_enabled
             );
             match st.manual_pause_until_epoch {
                 Some(u) if paused && u == state::MANUAL_PAUSE_INDEFINITE => {

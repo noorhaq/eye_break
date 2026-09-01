@@ -321,6 +321,45 @@ impl SettingsApp {
         ui.add_space(24.0);
         ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::divider()));
         ui.add_space(16.0);
+        ui.label(egui::RichText::new("Long breaks").size(14.0).color(design::text()));
+        ui.add_space(8.0);
+        if self.toggle_row(
+            ui,
+            "Enable long breaks",
+            "Every few breaks becomes a longer one, instead of every break being identical",
+            self.cfg.tiered_breaks_enabled,
+        ) {
+            self.cfg.tiered_breaks_enabled = !self.cfg.tiered_breaks_enabled;
+            self.save_cfg();
+        }
+        ui.add_space(10.0);
+        ui.columns(2, |cols| {
+            cols[0].label(egui::RichText::new("Breaks before a long one").size(12.0).color(design::neutral_600()));
+            if cols[0].add(egui::DragValue::new(&mut self.cfg.micro_breaks_before_long).range(1..=20)).changed() {
+                self.save_cfg();
+            }
+            cols[1].label(egui::RichText::new("Long break duration (sec)").size(12.0).color(design::neutral_600()));
+            if cols[1].add(egui::DragValue::new(&mut self.cfg.long_break_display_secs).range(10..=1800)).changed() {
+                self.save_cfg();
+            }
+        });
+
+        ui.add_space(24.0);
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::divider()));
+        ui.add_space(16.0);
+        if self.toggle_row(
+            ui,
+            "Strict mode",
+            "Break overlays run the full duration \u{2014} no Skip or \"OK, I'm done\" button",
+            self.cfg.strict_mode,
+        ) {
+            self.cfg.strict_mode = !self.cfg.strict_mode;
+            self.save_cfg();
+        }
+
+        ui.add_space(24.0);
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), egui::Stroke::new(1.0_f32, design::divider()));
+        ui.add_space(16.0);
         ui.label(egui::RichText::new("Startup & updates").size(14.0).color(design::text()));
         ui.add_space(8.0);
         let mut autostart_on = self.autostart_enabled;

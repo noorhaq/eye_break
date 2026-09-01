@@ -26,6 +26,12 @@ pub struct State {
     /// rather than any specific time.
     #[serde(default)]
     pub manual_pause_until_epoch: Option<u64>,
+    /// Number of micro breaks fired since the last long break, for the
+    /// plain-interval scheduler's tiered-breaks mode (`Config::
+    /// tiered_breaks_enabled`). Reset to 0 whenever a long break fires;
+    /// unused (stays 0) while that mode is off.
+    #[serde(default)]
+    pub micro_breaks_since_long: u32,
 }
 
 /// Sentinel for `manual_pause_until_epoch` meaning "paused with no set end
@@ -40,6 +46,7 @@ impl Default for State {
             snooze_until_epoch: None,
             dismiss_token: 0,
             manual_pause_until_epoch: None,
+            micro_breaks_since_long: 0,
         }
     }
 }
@@ -119,5 +126,55 @@ impl State {
     pub fn end_manual_pause(&mut self) {
         self.manual_pause_until_epoch = None;
         self.reset_schedule_baseline();
+    }
+
+    /// Whether tiered-breaks scheduling's *next* break should be a long
+    /// break rather than a micro break — true once `micro_breaks_since_long`
+    /// has caught up to `micro_breaks_before_long`. Shared by tray.rs's
+    /// scheduler (to decide what `trigger_break` actually shows) and
+    /// timer.rs (to label the corner countdown correctly ahead of time), so
+    /// the two can't drift out of sync with each other.
+    pub fn next_break_is_long(&self, micro_breaks_before_long: u32) -> bool {
+        self.micro_breaks_since_long >= micro_breaks_before_long.max(1)
+    }
+
+    /// Advances tiered-breaks bookkeeping for a break that just fired:
+    /// resets the counter after a long break, otherwise increments it.
+    /// Call alongside the `last_break_epoch`/`snooze_until_epoch` update in
+    /// `trigger_break`, using the same `micro_breaks_before_long` the
+    /// break's own long/short decision was already made from.
+    pub fn advance_tiered_breaks(&mut self, micro_breaks_before_long: u32) {
+        if self.next_break_is_long(micro_breaks_before_long) {
+            self.micro_breaks_since_long = 0;
+        } else {
+            self.micro_breaks_since_long += 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tiered_breaks_cycle_micro_then_long() {
+        let mut st = State::default();
+        // Three micro breaks, then a long one, repeating — matches the
+        // default `micro_breaks_before_long` of 3.
+        let before_long = 3;
+        let expected_is_long = [false, false, false, true, false, false, false, true];
+        for &want_long in &expected_is_long {
+            assert_eq!(st.next_break_is_long(before_long), want_long);
+            st.advance_tiered_breaks(before_long);
+        }
+    }
+
+    #[test]
+    fn tiered_breaks_disabled_stays_micro() {
+        // With the counter never advanced (mode off), every break reads as
+        // a micro break regardless of the threshold.
+        let st = State::default();
+        assert!(!st.next_break_is_long(3));
+        assert!(!st.next_break_is_long(1));
     }
 }

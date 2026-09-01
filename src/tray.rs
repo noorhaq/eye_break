@@ -311,7 +311,7 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
                 sync_timer_process(&exe_tick, &cfg, &timer_child_tick);
             } else if event.id == break_now_id {
                 let mut cfg = config.borrow_mut();
-                trigger_break(&mut cfg);
+                trigger_break(&mut cfg, false);
             } else if event.id == skip_id {
                 let cfg = config.borrow();
                 let mut st = State::load();
@@ -468,7 +468,11 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
         // (each a no-op when its own toggle is disabled), and driven by
         // either the Pomodoro cycle or the plain interval scheduler,
         // depending on which mode is active.
-        let due = {
+        // `is_long_tier` only means anything for the plain-interval branch —
+        // Pomodoro has its own short/long distinction baked into `phase`,
+        // and `trigger_break` ignores this flag whenever `pomodoro_enabled`
+        // is set, so it's fine to compute unconditionally here.
+        let (due, is_long_tier) = {
             let cfg = config.borrow();
             if !cfg.enabled
                 || !config::is_within_workday(&cfg)
@@ -476,16 +480,19 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
                 || cached_is_fullscreen
                 || is_manually_paused_now
             {
-                false
+                (false, false)
             } else if cfg.pomodoro_enabled {
-                pomodoro::pomodoro_due(&mut pomodoro_state.borrow_mut(), &cfg)
+                (pomodoro::pomodoro_due(&mut pomodoro_state.borrow_mut(), &cfg), false)
             } else {
-                now_epoch() >= st_now.next_break_epoch(cfg.interval_secs)
+                let due = now_epoch() >= st_now.next_break_epoch(cfg.interval_secs);
+                let is_long = cfg.tiered_breaks_enabled
+                    && st_now.next_break_is_long(cfg.micro_breaks_before_long);
+                (due, is_long)
             }
         };
         if due {
             let mut cfg = config.borrow_mut();
-            trigger_break(&mut cfg);
+            trigger_break(&mut cfg, is_long_tier);
         }
     }
 }
@@ -494,11 +501,19 @@ fn build_tick(should_quit: Rc<RefCell<bool>>) -> impl FnMut() {
 /// (rotating) exercise, and record that a break happened. Each overlay
 /// child manages its own lifetime and exits on its own, so this is
 /// fire-and-forget.
-fn trigger_break(cfg: &mut Config) {
+///
+/// `is_long` selects `long_break_display_secs` over the plain
+/// `display_secs` and tags the overlay so it renders a "LONG BREAK"
+/// marker — only meaningful for the plain-interval scheduler's tiered-
+/// breaks mode; pass `false` for Pomodoro breaks, which signal their own
+/// short/long distinction a different way (via `reminder_text` staying
+/// generic and the corner timer's phase label).
+fn trigger_break(cfg: &mut Config, is_long: bool) {
     crate::sounds::play(&cfg.sound);
     let monitors = list_monitors();
     let exe = std::env::current_exe().unwrap_or_else(|_| "eye-break".into());
     let exercise_index = cfg.next_exercise;
+    let display_secs = if is_long { cfg.long_break_display_secs } else { cfg.display_secs };
     // Captured once, before any overlay window exists, and handed to every
     // per-monitor child — so each one can hand focus straight back to
     // whatever the user was actually typing into instead of stealing it.
@@ -513,9 +528,10 @@ fn trigger_break(cfg: &mut Config) {
                 .arg(m.y.to_string())
                 .arg(m.w.to_string())
                 .arg(m.h.to_string())
-                .arg(cfg.display_secs.to_string())
+                .arg(display_secs.to_string())
                 .arg(exercise_index.to_string())
-                .arg(&original_focus),
+                .arg(&original_focus)
+                .arg(if is_long { "1" } else { "0" }),
         );
     }
     cfg.next_exercise = (exercise_index + 1) % exercises::count();
@@ -524,5 +540,8 @@ fn trigger_break(cfg: &mut Config) {
     let mut st = State::load();
     st.last_break_epoch = now_epoch();
     st.snooze_until_epoch = None;
+    if cfg.tiered_breaks_enabled {
+        st.advance_tiered_breaks(cfg.micro_breaks_before_long);
+    }
     st.save();
 }

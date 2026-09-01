@@ -86,6 +86,33 @@ pub struct Config {
     /// idle for the purposes of `idle_pause_enabled`.
     #[serde(default = "default_idle_pause_after_mins")]
     pub idle_pause_after_mins: u32,
+
+    /// When enabled, break overlays run for their full duration with no
+    /// "OK, I'm done" or "Skip" button — the only way out is to wait it
+    /// out. Off by default, matching the original always-skippable
+    /// behavior. Applies to every break regardless of scheduler
+    /// (plain-interval, tiered, or Pomodoro).
+    #[serde(default)]
+    pub strict_mode: bool,
+
+    /// Whether the plain-interval scheduler additionally distinguishes
+    /// short "micro" breaks from a periodic longer break, rather than
+    /// every break being identical — a second, less frequent tier layered
+    /// on top of `interval_secs`/`display_secs`. Off by default, matching
+    /// the original single-tier behavior. Has no effect while
+    /// `pomodoro_enabled` is true, since Pomodoro already has its own
+    /// short/long break distinction.
+    #[serde(default)]
+    pub tiered_breaks_enabled: bool,
+    /// How many micro breaks occur before the next one is a long break
+    /// instead.
+    #[serde(default = "default_micro_breaks_before_long")]
+    pub micro_breaks_before_long: u32,
+    /// How long a long break's overlay stays up, in seconds — distinct
+    /// from `display_secs`, which only governs micro breaks once tiered
+    /// breaks are enabled.
+    #[serde(default = "default_long_break_display_secs")]
+    pub long_break_display_secs: u64,
 }
 
 fn default_reminder_text() -> String {
@@ -140,6 +167,14 @@ fn default_workday_days() -> [bool; 7] {
     [true; 7]
 }
 
+fn default_micro_breaks_before_long() -> u32 {
+    3
+}
+
+fn default_long_break_display_secs() -> u64 {
+    60
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -167,6 +202,10 @@ impl Default for Config {
             fullscreen_pause_enabled: default_true(),
             idle_pause_enabled: default_true(),
             idle_pause_after_mins: default_idle_pause_after_mins(),
+            strict_mode: false,
+            tiered_breaks_enabled: false,
+            micro_breaks_before_long: default_micro_breaks_before_long(),
+            long_break_display_secs: default_long_break_display_secs(),
         }
     }
 }

@@ -177,7 +177,21 @@ impl eframe::App for TimerApp {
                         let next = self.state.next_break_epoch(interval);
                         let remaining = next.saturating_sub(now_epoch());
                         let elapsed_frac = 1.0 - (remaining as f32 / interval as f32).clamp(0.0, 1.0);
-                        (remaining, elapsed_frac, "NEXT BREAK IN")
+                        // Tiered breaks share the plain interval scheduler's
+                        // countdown (only which *kind* of break comes next
+                        // differs), so label ahead of time using the same
+                        // `next_break_is_long` decision tray.rs's
+                        // scheduler will make when this countdown hits zero
+                        // — kept as one shared method (see state.rs) so the
+                        // two can't drift apart.
+                        let label = if self.cfg.tiered_breaks_enabled
+                            && self.state.next_break_is_long(self.cfg.micro_breaks_before_long)
+                        {
+                            "NEXT LONG BREAK IN"
+                        } else {
+                            "NEXT BREAK IN"
+                        };
+                        (remaining, elapsed_frac, label)
                     };
 
                     painter.circle_stroke(

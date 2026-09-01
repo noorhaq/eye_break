@@ -7,6 +7,15 @@ All notable changes to Eye Break are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- Strict mode: an optional Settings toggle that removes the "OK, I'm done"
+  and "Skip" buttons from every break overlay, so a break always runs for
+  its full duration once it starts. Off by default.
+- Tiered (long) breaks for the plain interval scheduler: an optional
+  Settings toggle that turns every Nth break into a longer one — its own
+  configurable duration and a "LONG BREAK" tag on the overlay — instead of
+  every break being identical, without needing to switch to Pomodoro mode.
+  Off by default; has no effect while Pomodoro mode is on, since that
+  already has its own short/long break distinction.
 - A manual "Pause" option (tray menu, and `eye-break pause [mins]` /
   `eye-break resume` over SSH) for calls, presentations, and anything
   else where reminders shouldn't interrupt — distinct from unchecking
